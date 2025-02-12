@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"gofr.dev/pkg/gofr/datasource"
-
 	"github.com/redis/go-redis/v9"
+
+	"gofr.dev/pkg/gofr/datasource"
 )
 
 // redisHook is a custom Redis hook for logging queries and their durations.
@@ -22,9 +22,9 @@ type redisHook struct {
 
 // QueryLog represents a logged Redis query.
 type QueryLog struct {
-	Query    string      `json:"query"`
-	Duration int64       `json:"duration"`
-	Args     interface{} `json:"args,omitempty"`
+	Query    string `json:"query"`
+	Duration int64  `json:"duration"`
+	Args     any    `json:"args,omitempty"`
 }
 
 func (ql *QueryLog) PrettyPrint(writer io.Writer) {
@@ -51,7 +51,7 @@ func (ql *QueryLog) String() string {
 	}
 
 	switch args := ql.Args.(type) {
-	case []interface{}:
+	case []any:
 		strArgs := make([]string, len(args))
 		for i, arg := range args {
 			strArgs[i] = fmt.Sprint(arg)
@@ -64,8 +64,8 @@ func (ql *QueryLog) String() string {
 }
 
 // logQuery logs the Redis query information.
-func (r *redisHook) logQuery(start time.Time, query string, args ...interface{}) {
-	duration := time.Since(start).Milliseconds()
+func (r *redisHook) sendOperationStats(start time.Time, query string, args ...any) {
+	duration := time.Since(start).Microseconds()
 
 	r.logger.Debug(&QueryLog{
 		Query:    query,
@@ -78,7 +78,7 @@ func (r *redisHook) logQuery(start time.Time, query string, args ...interface{})
 }
 
 // DialHook implements the redis.DialHook interface.
-func (r *redisHook) DialHook(next redis.DialHook) redis.DialHook {
+func (*redisHook) DialHook(next redis.DialHook) redis.DialHook {
 	return next
 }
 
@@ -87,7 +87,7 @@ func (r *redisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
 		start := time.Now()
 		err := next(ctx, cmd)
-		r.logQuery(start, cmd.Name(), cmd.Args()...)
+		r.sendOperationStats(start, cmd.Name(), cmd.Args()...)
 
 		return err
 	}
@@ -98,7 +98,7 @@ func (r *redisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 	return func(ctx context.Context, cmds []redis.Cmder) error {
 		start := time.Now()
 		err := next(ctx, cmds)
-		r.logQuery(start, "pipeline", cmds[:len(cmds)-1])
+		r.sendOperationStats(start, "pipeline", cmds[:len(cmds)-1])
 
 		return err
 	}

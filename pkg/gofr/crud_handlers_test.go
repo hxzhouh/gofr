@@ -6,15 +6,16 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"strconv"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"gofr.dev/pkg/gofr/container"
@@ -44,11 +45,11 @@ type userEntity struct {
 	IsEmployed bool   `json:"isEmployed"`
 }
 
-func (u *userEntity) TableName() string {
+func (*userEntity) TableName() string {
 	return "user"
 }
 
-func (u *userEntity) RestPath() string {
+func (*userEntity) RestPath() string {
 	return "users"
 }
 
@@ -56,13 +57,13 @@ func Test_scanEntity(t *testing.T) {
 	var invalidObject int
 
 	type userTestEntity struct {
-		ID   int
-		Name string
+		ID   int    `sql:"auto_increment"`
+		Name string `sql:"not_null"`
 	}
 
 	tests := []struct {
 		desc  string
-		input interface{}
+		input any
 		resp  *entity
 		err   error
 	}{
@@ -74,7 +75,10 @@ func Test_scanEntity(t *testing.T) {
 				entityType: reflect.TypeOf(userTestEntity{}),
 				primaryKey: "id",
 				tableName:  "user_test_entity",
-				restPath:   "userTestEntity",
+				restPath:   "usertestentity",
+				constraints: map[string]gofrSql.FieldConstraints{"id": {AutoIncrement: true, NotNull: false},
+					"name": {AutoIncrement: false, NotNull: true},
+				},
 			},
 			err: nil,
 		},
@@ -87,6 +91,8 @@ func Test_scanEntity(t *testing.T) {
 				primaryKey: "id",
 				tableName:  "user",
 				restPath:   "users",
+				constraints: map[string]gofrSql.FieldConstraints{"id": {AutoIncrement: false, NotNull: false},
+					"is_employed": {AutoIncrement: false, NotNull: false}, "name": {AutoIncrement: false, NotNull: false}},
 			},
 			err: nil,
 		},
@@ -95,6 +101,12 @@ func Test_scanEntity(t *testing.T) {
 			input: &invalidObject,
 			resp:  nil,
 			err:   errInvalidObject,
+		},
+		{
+			desc:  "invalid object type",
+			input: userEntity{},
+			resp:  nil,
+			err:   fmt.Errorf("failed to register routes for 'userEntity' struct, %w", errNonPointerObject),
 		},
 	}
 
@@ -120,7 +132,7 @@ func (m *mockTableName) TableName() string {
 func Test_getTableName(t *testing.T) {
 	tests := []struct {
 		name       string
-		object     interface{}
+		object     any
 		structName string
 		want       string
 	}{
@@ -156,7 +168,7 @@ func (m *mockRestPath) RestPath() string {
 func Test_getRestPath(t *testing.T) {
 	tests := []struct {
 		name       string
-		object     interface{}
+		object     any
 		structName string
 		want       string
 	}{
@@ -167,10 +179,16 @@ func Test_getRestPath(t *testing.T) {
 			want:       "custom_path",
 		},
 		{
-			name:       "Test without RestPathOverrider interface",
+			name:       "Test without RestPathOverrider interface - with lower case transformation",
 			object:     &struct{}{},
 			structName: "TestStruct",
-			want:       "TestStruct",
+			want:       "teststruct",
+		},
+		{
+			name:       "Test without RestPathOverrider interface",
+			object:     &struct{}{},
+			structName: "test_struct",
+			want:       "test_struct",
 		},
 	}
 	for _, tt := range tests {
@@ -196,7 +214,7 @@ func Test_CreateHandler(t *testing.T) {
 		id            int
 		mockErr       error
 		expectedQuery string
-		expectedResp  interface{}
+		expectedResp  any
 		expectedErr   error
 	}{
 		{
@@ -244,11 +262,11 @@ func Test_CreateHandler(t *testing.T) {
 				"hostname", gomock.Any(), "database", gomock.Any(), "type", "INSERT").MaxTimes(2)
 
 			if tc.expectedErr == nil {
-				mocks.SQL.EXPECT().Dialect().Return(tc.dialect).Times(1)
+				mocks.SQL.ExpectDialect().WillReturnString(tc.dialect)
 			}
 
 			if tc.expectedQuery != "" {
-				mocks.SQL.EXPECT().ExecContext(ctx, tc.expectedQuery, tc.id, "goFr", true).Times(1)
+				mocks.SQL.ExpectExec(tc.expectedQuery).WithArgs(tc.id, "goFr", true).WillReturnResult(mocks.SQL.NewResult(10, 1))
 			}
 
 			resp, err := e.Create(ctx)
@@ -286,7 +304,7 @@ func Test_GetAllHandler(t *testing.T) {
 		desc         string
 		mockResp     *sqlmock.Rows
 		mockErr      error
-		expectedResp interface{}
+		expectedResp any
 		expectedErr  error
 	}
 
@@ -296,7 +314,7 @@ func Test_GetAllHandler(t *testing.T) {
 				desc:     "success case",
 				mockResp: sqlmock.NewRows([]string{"id", "name", "is_employed"}).AddRow(1, "John Doe", true).AddRow(2, "Jane Doe", false),
 				mockErr:  nil,
-				expectedResp: []interface{}{&userEntity{ID: 1, Name: "John Doe", IsEmployed: true},
+				expectedResp: []any{&userEntity{ID: 1, Name: "John Doe", IsEmployed: true},
 					&userEntity{ID: 2, Name: "Jane Doe", IsEmployed: false}},
 				expectedErr: nil,
 			},
@@ -339,9 +357,9 @@ func Test_GetAllHandler(t *testing.T) {
 				assert.Equal(t, tc.expectedResp, resp, "Failed.\n%s", tc.desc)
 
 				if tc.expectedErr != nil {
-					assert.Equal(t, tc.expectedErr.Error(), err.Error(), "TEST[%d], Failed.\n%s", i, tc.desc)
+					require.ErrorContainsf(t, err, tc.expectedErr.Error(), "TEST[%d], Failed.\n%s", i, tc.desc)
 				} else {
-					assert.Nil(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+					require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 				}
 			})
 		}
@@ -375,7 +393,7 @@ func Test_GetHandler(t *testing.T) {
 		id           string
 		mockRow      *sqlmock.Rows
 		mockErr      error
-		expectedResp interface{}
+		expectedResp any
 		expectedErr  error
 	}
 
@@ -424,9 +442,9 @@ func Test_GetHandler(t *testing.T) {
 				assert.Equal(t, tc.expectedResp, resp, "Failed.\n%s", tc.desc)
 
 				if tc.expectedErr != nil {
-					assert.Equal(t, tc.expectedErr.Error(), err.Error(), "Failed.\n%s", tc.desc)
+					require.ErrorContainsf(t, err, tc.expectedErr.Error(), "Failed.\n%s", tc.desc)
 				} else {
-					assert.Nil(t, err, "Failed.\n%s", tc.desc)
+					require.NoError(t, err, "Failed.\n%s", tc.desc)
 				}
 			})
 		}
@@ -459,10 +477,10 @@ func Test_UpdateHandler(t *testing.T) {
 
 	type testCase struct {
 		desc         string
-		id           int
+		id           string
 		reqBody      []byte
 		mockErr      error
-		expectedResp interface{}
+		expectedResp any
 		expectedErr  error
 	}
 
@@ -470,7 +488,7 @@ func Test_UpdateHandler(t *testing.T) {
 		tests := []testCase{
 			{
 				desc:         "success case",
-				id:           1,
+				id:           "1",
 				reqBody:      []byte(`{"id":1,"name":"goFr","isEmployed":true}`),
 				mockErr:      nil,
 				expectedResp: "userEntity successfully updated with id: 1",
@@ -478,7 +496,7 @@ func Test_UpdateHandler(t *testing.T) {
 			},
 			{
 				desc:         "bind error",
-				id:           2,
+				id:           "2",
 				reqBody:      []byte(`{"id":"2"}`),
 				mockErr:      nil,
 				expectedResp: nil,
@@ -486,7 +504,7 @@ func Test_UpdateHandler(t *testing.T) {
 			},
 			{
 				desc:         "error From DB",
-				id:           3,
+				id:           "3",
 				reqBody:      []byte(`{"id":3,"name":"goFr","isEmployed":false}`),
 				mockErr:      sqlmock.ErrCancelled,
 				expectedResp: nil,
@@ -499,7 +517,7 @@ func Test_UpdateHandler(t *testing.T) {
 
 		for i, tc := range tests {
 			t.Run(dc.dialect+" "+tc.desc, func(t *testing.T) {
-				ctx := createTestContext(http.MethodPut, "/user", strconv.Itoa(tc.id), tc.reqBody, c)
+				ctx := createTestContext(http.MethodPut, "/user", tc.id, tc.reqBody, c)
 
 				mock.ExpectExec(dc.expectedQuery).WithArgs("goFr", true, tc.id).
 					WillReturnResult(sqlmock.NewResult(1, 1)).WillReturnError(nil)
@@ -548,7 +566,7 @@ func Test_DeleteHandler(t *testing.T) {
 		mockResp     driver.Result
 		mockErr      error
 		expectedErr  error
-		expectedResp interface{}
+		expectedResp any
 	}
 
 	for _, dc := range dialectCases {
@@ -582,8 +600,8 @@ func Test_DeleteHandler(t *testing.T) {
 			t.Run(dc.dialect+" "+tc.desc, func(t *testing.T) {
 				ctx := createTestContext(http.MethodDelete, "/user", tc.id, nil, c)
 
-				mocks.SQL.EXPECT().Dialect().Return(dc.dialect)
-				mocks.SQL.EXPECT().ExecContext(ctx, dc.expectedQuery, tc.id).Return(tc.mockResp, tc.mockErr)
+				mocks.SQL.ExpectDialect().WillReturnString(dc.dialect)
+				mocks.SQL.ExpectExec(dc.expectedQuery).WithArgs(tc.id).WillReturnResult(tc.mockResp).WillReturnError(tc.mockErr)
 
 				resp, err := e.Delete(ctx)
 

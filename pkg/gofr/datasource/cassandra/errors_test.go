@@ -3,35 +3,31 @@ package cassandra
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_DestinationIsNotPointer_Error(t *testing.T) {
-	err := destinationIsNotPointer{}
-	result := err.Error()
+	err := errDestinationIsNotPointer
 
-	assert.Equal(t, msgDestinationIsNotPointer, result)
+	require.Equal(t, err, errDestinationIsNotPointer)
 }
 
 func Test_UnexpectedPointer_Error(t *testing.T) {
 	expected := "a pointer to int was not expected."
-	err := unexpectedPointer{target: "int"}
-	result := err.Error()
+	err := errUnexpectedPointer{target: "int"}
 
-	assert.Equal(t, expected, result)
+	require.ErrorContains(t, err, expected)
 }
 
 func Test_UnexpectedSlice_Error(t *testing.T) {
 	expected := "a slice of int was not expected."
-	err := unexpectedSlice{target: "int"}
-	result := err.Error()
+	err := errUnexpectedSlice{target: "int"}
 
-	assert.Equal(t, expected, result)
+	require.ErrorContains(t, err, expected)
 }
 
 func Test_UnexpectedMap_Error(t *testing.T) {
-	err := unexpectedMap{}
-	result := err.Error()
+	err := errUnexpectedMap
 
-	assert.Equal(t, msgUnexpectedMap, result)
+	require.ErrorIs(t, err, errUnexpectedMap)
 }

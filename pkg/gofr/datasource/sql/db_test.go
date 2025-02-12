@@ -9,6 +9,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"gofr.dev/pkg/gofr/logging"
@@ -22,6 +23,8 @@ var (
 )
 
 func getDB(t *testing.T, logLevel logging.Level) (*DB, sqlmock.Sqlmock) {
+	t.Helper()
+
 	mockDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual), sqlmock.MonitorPingsOption(true))
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
@@ -359,8 +362,8 @@ func TestDB_Query(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "SELECT")
 
 		rows, err = db.Query("SELECT 1")
-		assert.Nil(t, err)
-		assert.Nil(t, rows.Err())
+		require.NoError(t, err)
+		require.NoError(t, rows.Err())
 		assert.NotNil(t, rows)
 	})
 
@@ -389,10 +392,10 @@ func TestDB_QueryError(t *testing.T) {
 
 		rows, err = db.Query("SELECT")
 		if !assert.Nil(t, rows) {
-			assert.Nil(t, rows.Err())
+			require.NoError(t, rows.Err())
 		}
 
-		assert.NotNil(t, err)
+		require.Error(t, err)
 		assert.Equal(t, errSyntax, err)
 	})
 
@@ -420,8 +423,8 @@ func TestDB_QueryContext(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "SELECT")
 
 		rows, err = db.QueryContext(context.Background(), "SELECT 1")
-		assert.Nil(t, err)
-		assert.Nil(t, rows.Err())
+		require.NoError(t, err)
+		require.NoError(t, rows.Err())
 		assert.NotNil(t, rows)
 	})
 
@@ -450,10 +453,10 @@ func TestDB_QueryContextError(t *testing.T) {
 
 		rows, err = db.QueryContext(context.Background(), "SELECT")
 		if !assert.Nil(t, rows) {
-			assert.Nil(t, rows.Err())
+			require.NoError(t, rows.Err())
 		}
 
-		assert.NotNil(t, err)
+		require.Error(t, err)
 		assert.Equal(t, errSyntax, err)
 	})
 
@@ -532,7 +535,7 @@ func TestDB_Exec(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "INSERT")
 
 		res, err = db.Exec("INSERT INTO employee VALUES(?, ?)", 2, "doe")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, res)
 	})
 
@@ -561,7 +564,7 @@ func TestDB_ExecError(t *testing.T) {
 
 		res, err = db.Exec("INSERT INTO employee VALUES(?, ?", 2, "doe")
 		assert.Nil(t, res)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 		assert.Equal(t, errSyntax, err)
 	})
 
@@ -589,7 +592,7 @@ func TestDB_ExecContext(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "INSERT")
 
 		res, err = db.ExecContext(context.Background(), "INSERT INTO employee VALUES(?, ?)", 2, "doe")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, res)
 	})
 
@@ -617,7 +620,7 @@ func TestDB_ExecContextError(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "INSERT")
 
 		res, err = db.ExecContext(context.Background(), "INSERT INTO employee VALUES(?, ?)", 2, "doe")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, res)
 	})
 
@@ -644,7 +647,7 @@ func TestDB_Prepare(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "SELECT")
 
 		stmt, err = db.Prepare("SELECT name FROM employee WHERE id = ?")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, stmt)
 	})
 
@@ -671,7 +674,7 @@ func TestDB_PrepareError(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "SELECT")
 
 		stmt, err = db.Prepare("SELECT name FROM employee WHERE id = ?")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, stmt)
 	})
 
@@ -686,7 +689,7 @@ func TestDB_Begin(t *testing.T) {
 	tx, err := db.Begin()
 
 	assert.NotNil(t, tx)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 }
 
 func TestDB_BeginError(t *testing.T) {
@@ -697,8 +700,18 @@ func TestDB_BeginError(t *testing.T) {
 	tx, err := db.Begin()
 
 	assert.Nil(t, tx)
-	assert.NotNil(t, err)
+	require.Error(t, err)
 	assert.Equal(t, errTx, err)
+}
+
+func TestDB_Close(t *testing.T) {
+	db, mock := getDB(t, logging.INFO)
+
+	mock.ExpectClose()
+
+	err := db.Close()
+
+	require.NoError(t, err)
 }
 
 func getTransaction(db *DB, mock sqlmock.Sqlmock) *Tx {
@@ -732,9 +745,9 @@ func TestTx_Query(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "SELECT")
 
 		rows, err = tx.Query("SELECT 1")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, rows)
-		assert.Nil(t, rows.Err())
+		require.NoError(t, rows.Err())
 	})
 
 	assert.Contains(t, out, "Query SELECT 1")
@@ -763,10 +776,10 @@ func TestTx_QueryError(t *testing.T) {
 
 		rows, err = tx.Query("SELECT")
 		if !assert.Nil(t, rows) {
-			assert.Nil(t, rows.Err())
+			require.NoError(t, rows.Err())
 		}
 
-		assert.NotNil(t, err)
+		require.Error(t, err)
 		assert.Equal(t, errSyntax, err)
 	})
 
@@ -851,7 +864,7 @@ func TestTx_Exec(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "INSERT")
 
 		res, err = tx.Exec("INSERT INTO employee VALUES(?, ?)", 2, "doe")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, res)
 	})
 
@@ -882,7 +895,7 @@ func TestTx_ExecError(t *testing.T) {
 
 		res, err = tx.Exec("INSERT INTO employee VALUES(?, ?", 2, "doe")
 		assert.Nil(t, res)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 		assert.Equal(t, errSyntax, err)
 	})
 
@@ -912,7 +925,7 @@ func TestTx_ExecContext(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "INSERT")
 
 		res, err = tx.ExecContext(context.Background(), "INSERT INTO employee VALUES(?, ?)", 2, "doe")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, res)
 	})
 
@@ -942,7 +955,7 @@ func TestTx_ExecContextError(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "INSERT")
 
 		res, err = tx.ExecContext(context.Background(), "INSERT INTO employee VALUES(?, ?)", 2, "doe")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, res)
 	})
 
@@ -971,7 +984,7 @@ func TestTx_Prepare(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "SELECT")
 
 		stmt, err = tx.Prepare("SELECT name FROM employee WHERE id = ?")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, stmt)
 	})
 
@@ -1000,7 +1013,7 @@ func TestTx_PrepareError(t *testing.T) {
 			gomock.Any(), "hostname", gomock.Any(), "database", gomock.Any(), "type", "SELECT")
 
 		stmt, err = tx.Prepare("SELECT name FROM employee WHERE id = ?")
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, stmt)
 	})
 
@@ -1025,7 +1038,7 @@ func TestTx_Commit(t *testing.T) {
 		mock.ExpectCommit()
 
 		err = tx.Commit()
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 
 	assert.Contains(t, out, "TxCommit COMMIT")
@@ -1049,7 +1062,7 @@ func TestTx_CommitError(t *testing.T) {
 		mock.ExpectCommit().WillReturnError(errDB)
 
 		err = tx.Commit()
-		assert.NotNil(t, err)
+		require.Error(t, err)
 		assert.Equal(t, errDB, err)
 	})
 
@@ -1074,7 +1087,7 @@ func TestTx_RollBack(t *testing.T) {
 		mock.ExpectRollback()
 
 		err = tx.Rollback()
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 
 	assert.Contains(t, out, "TxRollback ROLLBACK")
@@ -1098,7 +1111,7 @@ func TestTx_RollbackError(t *testing.T) {
 		mock.ExpectRollback().WillReturnError(errDB)
 
 		err = tx.Rollback()
-		assert.NotNil(t, err)
+		require.Error(t, err)
 		assert.Equal(t, errDB, err)
 	})
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -34,7 +35,7 @@ func Test_ExportSpans(t *testing.T) {
 	for i, tc := range tests {
 		err := exporter.ExportSpans(context.Background(), tc.spans)
 
-		assert.Nil(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 	}
 }
 
@@ -46,10 +47,12 @@ func Test_ExportSpansError(t *testing.T) {
 	exporter := NewExporter(server.URL, logging.NewLogger(logging.INFO))
 
 	err := exporter.ExportSpans(context.Background(), provideSampleSpan(t))
-	assert.Error(t, err, "Expected error for failed request")
+	require.Error(t, err, "Expected error for failed request")
 }
 
 func provideSampleSpan(t *testing.T) []sdktrace.ReadOnlySpan {
+	t.Helper()
+
 	tp := sdktrace.NewTracerProvider()
 
 	defer func(tp *sdktrace.TracerProvider, ctx context.Context) {

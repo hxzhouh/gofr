@@ -29,32 +29,32 @@ type HTTP interface {
 
 	// HealthCheck to get the service health and report it to the current application
 	HealthCheck(ctx context.Context) *Health
-	getHealthResponseForEndpoint(ctx context.Context, endpoint string) *Health
+	getHealthResponseForEndpoint(ctx context.Context, endpoint string, timeout int) *Health
 }
 
 type httpClient interface {
 	// Get performs an HTTP GET request.
-	Get(ctx context.Context, api string, queryParams map[string]interface{}) (*http.Response, error)
+	Get(ctx context.Context, api string, queryParams map[string]any) (*http.Response, error)
 	// GetWithHeaders performs an HTTP GET request with custom headers.
-	GetWithHeaders(ctx context.Context, path string, queryParams map[string]interface{},
+	GetWithHeaders(ctx context.Context, path string, queryParams map[string]any,
 		headers map[string]string) (*http.Response, error)
 
 	// Post performs an HTTP POST request.
-	Post(ctx context.Context, path string, queryParams map[string]interface{}, body []byte) (*http.Response, error)
+	Post(ctx context.Context, path string, queryParams map[string]any, body []byte) (*http.Response, error)
 	// PostWithHeaders performs an HTTP POST request with custom headers.
-	PostWithHeaders(ctx context.Context, path string, queryParams map[string]interface{}, body []byte,
+	PostWithHeaders(ctx context.Context, path string, queryParams map[string]any, body []byte,
 		headers map[string]string) (*http.Response, error)
 
 	// Put performs an HTTP PUT request.
-	Put(ctx context.Context, api string, queryParams map[string]interface{}, body []byte) (*http.Response, error)
+	Put(ctx context.Context, api string, queryParams map[string]any, body []byte) (*http.Response, error)
 	// PutWithHeaders performs an HTTP PUT request with custom headers.
-	PutWithHeaders(ctx context.Context, api string, queryParams map[string]interface{}, body []byte,
+	PutWithHeaders(ctx context.Context, api string, queryParams map[string]any, body []byte,
 		headers map[string]string) (*http.Response, error)
 
 	// Patch performs an HTTP PATCH request.
-	Patch(ctx context.Context, api string, queryParams map[string]interface{}, body []byte) (*http.Response, error)
+	Patch(ctx context.Context, api string, queryParams map[string]any, body []byte) (*http.Response, error)
 	// PatchWithHeaders performs an HTTP PATCH request with custom headers.
-	PatchWithHeaders(ctx context.Context, api string, queryParams map[string]interface{}, body []byte,
+	PatchWithHeaders(ctx context.Context, api string, queryParams map[string]any, body []byte,
 		headers map[string]string) (*http.Response, error)
 
 	// Delete performs an HTTP DELETE request.
@@ -86,40 +86,40 @@ func NewHTTPService(serviceAddress string, logger Logger, metrics Metrics, optio
 	return svc
 }
 
-func (h *httpService) Get(ctx context.Context, path string, queryParams map[string]interface{}) (*http.Response, error) {
+func (h *httpService) Get(ctx context.Context, path string, queryParams map[string]any) (*http.Response, error) {
 	return h.GetWithHeaders(ctx, path, queryParams, nil)
 }
 
-func (h *httpService) GetWithHeaders(ctx context.Context, path string, queryParams map[string]interface{},
+func (h *httpService) GetWithHeaders(ctx context.Context, path string, queryParams map[string]any,
 	headers map[string]string) (*http.Response, error) {
 	return h.createAndSendRequest(ctx, http.MethodGet, path, queryParams, nil, headers)
 }
 
-func (h *httpService) Post(ctx context.Context, path string, queryParams map[string]interface{},
+func (h *httpService) Post(ctx context.Context, path string, queryParams map[string]any,
 	body []byte) (*http.Response, error) {
 	return h.PostWithHeaders(ctx, path, queryParams, body, nil)
 }
 
-func (h *httpService) PostWithHeaders(ctx context.Context, path string, queryParams map[string]interface{},
+func (h *httpService) PostWithHeaders(ctx context.Context, path string, queryParams map[string]any,
 	body []byte, headers map[string]string) (*http.Response, error) {
 	return h.createAndSendRequest(ctx, http.MethodPost, path, queryParams, body, headers)
 }
 
-func (h *httpService) Patch(ctx context.Context, path string, queryParams map[string]interface{}, body []byte) (*http.Response, error) {
+func (h *httpService) Patch(ctx context.Context, path string, queryParams map[string]any, body []byte) (*http.Response, error) {
 	return h.PatchWithHeaders(ctx, path, queryParams, body, nil)
 }
 
-func (h *httpService) PatchWithHeaders(ctx context.Context, path string, queryParams map[string]interface{},
+func (h *httpService) PatchWithHeaders(ctx context.Context, path string, queryParams map[string]any,
 	body []byte, headers map[string]string) (*http.Response, error) {
 	return h.createAndSendRequest(ctx, http.MethodPatch, path, queryParams, body, headers)
 }
 
-func (h *httpService) Put(ctx context.Context, path string, queryParams map[string]interface{},
+func (h *httpService) Put(ctx context.Context, path string, queryParams map[string]any,
 	body []byte) (*http.Response, error) {
 	return h.PutWithHeaders(ctx, path, queryParams, body, nil)
 }
 
-func (h *httpService) PutWithHeaders(ctx context.Context, path string, queryParams map[string]interface{},
+func (h *httpService) PutWithHeaders(ctx context.Context, path string, queryParams map[string]any,
 	body []byte, headers map[string]string) (*http.Response, error) {
 	return h.createAndSendRequest(ctx, http.MethodPut, path, queryParams, body, headers)
 }
@@ -133,33 +133,45 @@ func (h *httpService) DeleteWithHeaders(ctx context.Context, path string, body [
 }
 
 func (h *httpService) createAndSendRequest(ctx context.Context, method string, path string,
-	queryParams map[string]interface{}, body []byte, headers map[string]string) (*http.Response, error) {
+	queryParams map[string]any, body []byte, headers map[string]string) (*http.Response, error) {
 	uri := h.url + "/" + path
 	uri = strings.TrimRight(uri, "/")
 
-	spanContext, span := h.Tracer.Start(ctx, uri)
+	ctx, span := h.Tracer.Start(ctx, uri)
 	defer span.End()
 
-	spanContext = httptrace.WithClientTrace(spanContext, otelhttptrace.NewClientTrace(ctx))
+	// Attach client-side trace handling for HTTP request.
+	clientTraceCtx := httptrace.WithClientTrace(ctx, otelhttptrace.NewClientTrace(ctx))
 
-	req, err := http.NewRequestWithContext(spanContext, method, uri, bytes.NewBuffer(body))
+	// Create the HTTP request with the tracing context.
+	req, err := http.NewRequestWithContext(clientTraceCtx, method, uri, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
 
+	var isContentTypeSet bool
+
 	for k, v := range headers {
+		if strings.EqualFold(k, "content-type") {
+			isContentTypeSet = true
+		}
+
 		req.Header.Set(k, v)
 	}
 
-	// encode the query parameters on the request
-	encodeQueryParameters(req, queryParams)
+	if !isContentTypeSet {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
-	// inject the TraceParent header manually in the request headers
-	otel.GetTextMapPropagator().Inject(spanContext, propagation.HeaderCarrier(req.Header))
+	// Inject tracing information into the request headers.
+	otel.GetTextMapPropagator().Inject(clientTraceCtx, propagation.HeaderCarrier(req.Header))
+
+	// encode the query parameters on the request.
+	encodeQueryParameters(req, queryParams)
 
 	log := &Log{
 		Timestamp:     time.Now(),
-		CorrelationID: trace.SpanFromContext(ctx).SpanContext().TraceID().String(),
+		CorrelationID: trace.SpanFromContext(clientTraceCtx).SpanContext().TraceID().String(),
 		HTTPMethod:    method,
 		URI:           uri,
 	}
@@ -170,23 +182,18 @@ func (h *httpService) createAndSendRequest(ctx context.Context, method string, p
 
 	respTime := time.Since(requestStart)
 
-	if h.Metrics != nil && resp != nil {
-		h.RecordHistogram(ctx, "app_http_service_response", respTime.Seconds(), "path", h.url, "method", method,
-			"status", fmt.Sprintf("%v", resp.StatusCode))
-	}
-
-	log.ResponseTime = respTime.Milliseconds()
+	log.ResponseTime = respTime.Microseconds()
 
 	if err != nil {
 		log.ResponseCode = http.StatusInternalServerError
 		h.Log(&ErrorLog{Log: log, ErrorMessage: err.Error()})
 
-		h.RecordHistogram(ctx, "app_http_service_response", respTime.Seconds(), "path", h.url, "method", method,
-			"status", fmt.Sprintf("%v", http.StatusInternalServerError))
+		h.updateMetrics(clientTraceCtx, method, respTime.Seconds(), http.StatusInternalServerError)
 
 		return resp, err
 	}
 
+	h.updateMetrics(clientTraceCtx, method, respTime.Seconds(), resp.StatusCode)
 	log.ResponseCode = resp.StatusCode
 
 	h.Log(log)
@@ -194,7 +201,14 @@ func (h *httpService) createAndSendRequest(ctx context.Context, method string, p
 	return resp, nil
 }
 
-func encodeQueryParameters(req *http.Request, queryParams map[string]interface{}) {
+func (h *httpService) updateMetrics(ctx context.Context, method string, timeTaken float64, statusCode int) {
+	if h.Metrics != nil {
+		h.RecordHistogram(ctx, "app_http_service_response", timeTaken, "path", h.url, "method", method,
+			"status", fmt.Sprintf("%v", statusCode))
+	}
+}
+
+func encodeQueryParameters(req *http.Request, queryParams map[string]any) {
 	q := req.URL.Query()
 
 	for k, v := range queryParams {

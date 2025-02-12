@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"runtime/debug"
-	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel/trace"
 
 	"gofr.dev/pkg/gofr/container"
 	gofrHTTP "gofr.dev/pkg/gofr/http"
@@ -19,7 +20,9 @@ import (
 	"gofr.dev/pkg/gofr/static"
 )
 
-type Handler func(c *Context) (interface{}, error)
+const colorCodeError = 202 // 202 is red color code
+
+type Handler func(c *Context) (any, error)
 
 /*
 Developer Note: There is an implementation where we do not need this internal handler struct
@@ -37,24 +40,27 @@ for now. In the future, this can be considered as well if we are writing our own
 type handler struct {
 	function       Handler
 	container      *container.Container
-	requestTimeout string
+	requestTimeout time.Duration
+}
+
+type ErrorLogEntry struct {
+	TraceID string `json:"trace_id,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (el *ErrorLogEntry) PrettyPrint(writer io.Writer) {
+	fmt.Fprintf(writer, "\u001B[38;5;8m%s \u001B[38;5;%dm%s \n", el.TraceID, colorCodeError, el.Error)
 }
 
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c := newContext(gofrHTTP.NewResponder(w, r.Method), gofrHTTP.NewRequest(r), h.container)
-
-	var (
-		ctx    context.Context
-		cancel context.CancelFunc
-	)
+	traceID := trace.SpanFromContext(r.Context()).SpanContext().TraceID().String()
 
 	if websocket.IsWebSocketUpgrade(r) {
 		// If the request is a WebSocket upgrade, do not apply the timeout
-		ctx = r.Context()
-	} else if h.requestTimeout != "" {
-		reqTimeout := h.setContextTimeout(h.requestTimeout)
-
-		ctx, cancel = context.WithTimeout(r.Context(), time.Duration(reqTimeout)*time.Second)
+		c.Context = r.Context()
+	} else if h.requestTimeout != 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), h.requestTimeout)
 		defer cancel()
 
 		c.Context = ctx
@@ -64,48 +70,52 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	panicked := make(chan struct{})
 
 	var (
-		result interface{}
+		result any
 		err    error
 	)
 
 	go func() {
-		defer panicRecoveryHandler(h.container, panicked)
+		defer func() {
+			panicRecoveryHandler(recover(), h.container, panicked)
+		}()
 		// Execute the handler function
 		result, err = h.function(c)
-
+		h.logError(traceID, err)
 		close(done)
 	}()
 
 	select {
 	case <-c.Context.Done():
 		// If the context's deadline has been exceeded, return a timeout error response
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if errors.Is(c.Err(), context.DeadlineExceeded) {
 			err = gofrHTTP.ErrorRequestTimeout{}
 		}
 	case <-done:
-		if websocket.IsWebSocketUpgrade(r) {
-			// Do not respond with HTTP headers since this is a WebSocket request
-			return
-		}
+		handleWebSocketUpgrade(r)
 	case <-panicked:
 		err = gofrHTTP.ErrorPanicRecovery{}
+	}
+
+	// Handle custom headers if 'result' is a 'Response'.
+	if resp, ok := result.(response.Response); ok {
+		resp.SetCustomHeaders(w)
 	}
 
 	// Handler function completed
 	c.responder.Respond(result, err)
 }
 
-func healthHandler(c *Context) (interface{}, error) {
+func healthHandler(c *Context) (any, error) {
 	return c.Health(c), nil
 }
 
-func liveHandler(*Context) (interface{}, error) {
+func liveHandler(*Context) (any, error) {
 	return struct {
 		Status string `json:"status"`
 	}{Status: "UP"}, nil
 }
 
-func faviconHandler(*Context) (interface{}, error) {
+func faviconHandler(*Context) (any, error) {
 	data, err := os.ReadFile("./static/favicon.ico")
 	if err != nil {
 		data, err = static.Files.ReadFile("favicon.ico")
@@ -117,27 +127,52 @@ func faviconHandler(*Context) (interface{}, error) {
 	}, err
 }
 
-func catchAllHandler(*Context) (interface{}, error) {
+func catchAllHandler(*Context) (any, error) {
 	return nil, gofrHTTP.ErrorInvalidRoute{}
 }
 
-// Helper function to parse and validate request timeout.
-func (h handler) setContextTimeout(timeout string) int {
-	reqTimeout, err := strconv.Atoi(timeout)
-	if err != nil || reqTimeout < 0 {
-		h.container.Error("invalid value of config REQUEST_TIMEOUT. setting default value to 5 seconds.")
+func panicRecoveryHandler(re any, log logging.Logger, panicked chan struct{}) {
+	if re == nil {
+		return
 	}
 
-	return reqTimeout
+	close(panicked)
+	log.Error(panicLog{
+		Error:      fmt.Sprint(re),
+		StackTrace: string(debug.Stack()),
+	})
 }
 
-func panicRecoveryHandler(log logging.Logger, panicked chan struct{}) {
-	re := recover()
-	if re != nil {
-		close(panicked)
-		log.Error(panicLog{
-			Error:      fmt.Sprint(re),
-			StackTrace: string(debug.Stack()),
-		})
+// Log the error(if any) with traceID and errorMessage.
+func (h handler) logError(traceID string, err error) {
+	if err != nil {
+		errorLog := &ErrorLogEntry{TraceID: traceID, Error: err.Error()}
+
+		// define the default log level for error
+		loggerHelper := h.container.Logger.Error
+
+		switch logging.GetLogLevelForError(err) {
+		case logging.ERROR:
+			// we use the default log level for error
+		case logging.INFO:
+			loggerHelper = h.container.Logger.Info
+		case logging.NOTICE:
+			loggerHelper = h.container.Logger.Notice
+		case logging.DEBUG:
+			loggerHelper = h.container.Logger.Debug
+		case logging.WARN:
+			loggerHelper = h.container.Logger.Warn
+		case logging.FATAL:
+			loggerHelper = h.container.Logger.Fatal
+		}
+
+		loggerHelper(errorLog)
+	}
+}
+
+func handleWebSocketUpgrade(r *http.Request) {
+	if websocket.IsWebSocketUpgrade(r) {
+		// Do not respond with HTTP headers since this is a WebSocket request
+		return
 	}
 }

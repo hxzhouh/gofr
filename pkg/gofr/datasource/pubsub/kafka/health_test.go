@@ -5,6 +5,7 @@ import (
 
 	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"gofr.dev/pkg/gofr/datasource"
@@ -28,7 +29,7 @@ func TestKafkaClient_HealthStatusUP(t *testing.T) {
 
 	expectedHealth := datasource.Health{
 		Status: datasource.StatusUp,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"host":    "",
 			"backend": "KAFKA",
 		},
@@ -61,7 +62,7 @@ func TestKafkaClient_HealthStatusDown(t *testing.T) {
 
 	expectedHealth := datasource.Health{
 		Status: datasource.StatusDown,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"host":    "",
 			"backend": "KAFKA",
 		},
@@ -115,8 +116,8 @@ func TestKafkaClient_getReaderStatsAsMap(t *testing.T) {
 func TestKafkaClint_convertStructToMap(t *testing.T) {
 	testCases := []struct {
 		desc   string
-		input  interface{}
-		output interface{}
+		input  any
+		output any
 	}{
 		{"unmarshal error", make(chan int), nil},
 	}
@@ -124,6 +125,6 @@ func TestKafkaClint_convertStructToMap(t *testing.T) {
 	for _, v := range testCases {
 		err := convertStructToMap(v.input, v.output)
 
-		assert.Contains(t, "json: unsupported type: chan int", err.Error())
+		require.ErrorContains(t, err, "json: unsupported type: chan int")
 	}
 }

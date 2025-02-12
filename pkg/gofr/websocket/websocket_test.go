@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/mock/gomock"
-
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	gomock "go.uber.org/mock/gomock"
 )
 
 func TestConnection_Bind_Success(t *testing.T) {
@@ -19,7 +19,7 @@ func TestConnection_Bind_Success(t *testing.T) {
 	tests := []struct {
 		name         string
 		inputMessage []byte
-		expectedData interface{}
+		expectedData any
 	}{
 		{
 			name:         "Bind to string",
@@ -29,7 +29,7 @@ func TestConnection_Bind_Success(t *testing.T) {
 		{
 			name:         "Bind to JSON struct",
 			inputMessage: []byte(`{"key":"value"}`),
-			expectedData: map[string]interface{}{"key": "value"},
+			expectedData: map[string]any{"key": "value"},
 		},
 	}
 
@@ -37,21 +37,21 @@ func TestConnection_Bind_Success(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				conn, err := upgrader.Upgrade(w, r, nil)
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 				defer conn.Close()
 
 				wsConn := &Connection{Conn: conn}
 
-				var data interface{}
+				var data any
 				switch tt.expectedData.(type) {
 				case string:
 					data = new(string)
 				default:
-					data = &map[string]interface{}{}
+					data = &map[string]any{}
 				}
 
 				err = wsConn.Bind(data)
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedData, dereference(data))
 			}))
 			defer server.Close()
@@ -59,13 +59,13 @@ func TestConnection_Bind_Success(t *testing.T) {
 			url := "ws" + server.URL[len("http"):] + "/ws"
 			dialer := websocket.DefaultDialer
 			conn, resp, err := dialer.Dial(url, nil)
-			assert.Nil(t, err)
+			require.NoError(t, err)
 
 			defer conn.Close()
 			defer resp.Body.Close()
 
 			err = conn.WriteMessage(websocket.TextMessage, tt.inputMessage)
-			assert.Nil(t, err)
+			require.NoError(t, err)
 		})
 
 		// waiting for previous connection to close and test for new testcase.
@@ -83,7 +83,7 @@ func TestNewWSUpgrader_WithOptions(t *testing.T) {
 	options := []Options{
 		WithReadBufferSize(1024),
 		WithWriteBufferSize(1024),
-		WithHandshakeTimeout(5 * time.Second),
+		WithHandshakeTimeout(500 * time.Millisecond),
 		WithSubprotocols("protocol1", "protocol2"),
 		WithCompression(),
 		WithError(errorHandler),
@@ -95,7 +95,7 @@ func TestNewWSUpgrader_WithOptions(t *testing.T) {
 
 	assert.Equal(t, 1024, actualUpgrader.ReadBufferSize)
 	assert.Equal(t, 1024, actualUpgrader.WriteBufferSize)
-	assert.Equal(t, 5*time.Second, actualUpgrader.HandshakeTimeout)
+	assert.Equal(t, 500*time.Millisecond, actualUpgrader.HandshakeTimeout)
 	assert.Equal(t, []string{"protocol1", "protocol2"}, actualUpgrader.Subprotocols)
 	assert.True(t, actualUpgrader.EnableCompression)
 	assert.NotNil(t, actualUpgrader.Error)
@@ -114,12 +114,12 @@ func Test_Upgrade(t *testing.T) {
 	wsUpgrader := WSUpgrader{Upgrader: mockUpgrader}
 
 	req, err := http.NewRequestWithContext(context.TODO(), http.MethodGet, "/", http.NoBody)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
 
 	conn, err := wsUpgrader.Upgrade(w, req, nil)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	assert.Equal(t, expectedConn, conn)
 }
@@ -127,17 +127,18 @@ func Test_Upgrade(t *testing.T) {
 func Test_UnimplementedMethods(t *testing.T) {
 	conn := &Connection{}
 
-	assert.Equal(t, "", conn.Param("test"))
-	assert.Equal(t, "", conn.PathParam("test"))
-	assert.Equal(t, "", conn.HostName())
-	assert.NotNil(t, "", conn.Context())
+	assert.Empty(t, conn.Param("test"))
+	assert.Empty(t, conn.PathParam("test"))
+	assert.Empty(t, conn.HostName())
+	assert.NotNil(t, conn.Context())
+	assert.Nil(t, conn.Params("test"))
 }
 
-func dereference(v interface{}) interface{} {
+func dereference(v any) any {
 	switch v := v.(type) {
 	case *string:
 		return *v
-	case *map[string]interface{}:
+	case *map[string]any:
 		return *v
 	default:
 		return v

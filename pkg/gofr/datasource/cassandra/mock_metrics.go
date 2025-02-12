@@ -6,7 +6,6 @@
 //	mockgen -source=metrics.go -destination=mock_metrics.go -package=cassandra
 //
 
-// Package cassandra is a generated GoMock package.
 package cassandra
 
 import (

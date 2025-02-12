@@ -30,10 +30,10 @@ type Data struct {
 
 	// The FileHeader determines the generic file format that we can get
 	// from the multipart form that gets parsed by the incoming HTTP request
-	FileHeader *multipart.FileHeader `file:"a"`
+	FileHeader *multipart.FileHeader `file:"file_upload"`
 }
 
-func UploadHandler(c *gofr.Context) (interface{}, error) {
+func UploadHandler(c *gofr.Context) (any, error) {
 	var d Data
 
 	// bind the multipart data into the variable d
@@ -63,6 +63,6 @@ func UploadHandler(c *gofr.Context) (interface{}, error) {
 		return false, err
 	}
 
-	// return the number of compressed files recieved
+	// return the number of compressed files received
 	return fmt.Sprintf("zipped files: %d, len of file `a`: %d", len(d.Compressed.Files), len(content)), nil
 }

@@ -7,29 +7,33 @@ type Datasource struct {
 	// Need to think it through as it will bring breaking changes.
 	Logger
 
-	SQL    SQL
-	Redis  Redis
-	PubSub PubSub
+	SQL        SQL
+	Redis      Redis
+	PubSub     PubSub
+	Clickhouse Clickhouse
+	Cassandra  Cassandra
+	Mongo      Mongo
+	ArangoDB   ArangoDB
 }
 
-// It is a base implementation for migration manger, on this other database drivers have been wrapped.
+// It is a base implementation for migration manager, on this other database drivers have been wrapped.
 
-func (d Datasource) checkAndCreateMigrationTable(*container.Container) error {
+func (*Datasource) checkAndCreateMigrationTable(*container.Container) error {
 	return nil
 }
 
-func (d Datasource) getLastMigration(*container.Container) int64 {
+func (*Datasource) getLastMigration(*container.Container) int64 {
 	return 0
 }
 
-func (d Datasource) beginTransaction(*container.Container) transactionData {
+func (*Datasource) beginTransaction(*container.Container) transactionData {
 	return transactionData{}
 }
 
-func (d Datasource) commitMigration(c *container.Container, data transactionData) error {
+func (*Datasource) commitMigration(c *container.Container, data transactionData) error {
 	c.Infof("Migration %v ran successfully", data.MigrationNumber)
 
 	return nil
 }
 
-func (d Datasource) rollback(*container.Container, transactionData) {}
+func (*Datasource) rollback(*container.Container, transactionData) {}

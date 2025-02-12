@@ -48,19 +48,19 @@ func NewWSUpgrader(opts ...Options) *WSUpgrader {
 	}
 }
 
-func (w *Connection) Context() context.Context {
+func (*Connection) Context() context.Context {
 	return context.TODO() // Implement proper context handling if needed
 }
 
-func (w *Connection) Param(_ string) string {
+func (*Connection) Param(_ string) string {
 	return "" // Not applicable for WebSocket, can be implemented if needed
 }
 
-func (w *Connection) PathParam(_ string) string {
+func (*Connection) PathParam(_ string) string {
 	return "" // Not applicable for WebSocket, can be implemented if needed
 }
 
-func (w *Connection) Bind(v interface{}) error {
+func (w *Connection) Bind(v any) error {
 	_, message, err := w.Conn.ReadMessage()
 	if err != nil {
 		return err
@@ -76,12 +76,12 @@ func (w *Connection) Bind(v interface{}) error {
 	return nil
 }
 
-func (w *Connection) HostName() string {
+func (*Connection) HostName() string {
 	return "" // Not applicable for WebSocket, can be implemented if needed
 }
 
 // Manager is a websocket manager that handles the upgrader and manages all
-// active connections thorugh ConnectionHub.
+// active connections through ConnectionHub.
 type Manager struct {
 	ConnectionHub
 	WebSocketUpgrader *WSUpgrader
@@ -94,7 +94,7 @@ type ConnectionHub struct {
 	WebSocketConnections map[string]*Connection
 }
 
-// New intializes a new websocket manager with default websocket upgrader.
+// New initializes a new websocket manager with default websocket upgrader.
 func New() *Manager {
 	return &Manager{
 		WebSocketUpgrader: NewWSUpgrader(),
@@ -110,7 +110,7 @@ func (u *WSUpgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHea
 	return u.Upgrader.Upgrade(w, r, responseHeader)
 }
 
-// GetWebsocketConnection returns a websocket connection which has been intialized in the middleware.
+// GetWebsocketConnection returns a websocket connection which has been initialized in the middleware.
 func (ws *Manager) GetWebsocketConnection(connID string) *Connection {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -136,4 +136,8 @@ func (ws *Manager) CloseConnection(connID string) {
 
 		delete(ws.WebSocketConnections, connID)
 	}
+}
+
+func (*Connection) Params(string) []string {
+	return nil
 }

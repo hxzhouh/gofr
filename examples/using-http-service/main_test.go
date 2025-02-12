@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,20 +11,25 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"gofr.dev/pkg/gofr"
 	"gofr.dev/pkg/gofr/container"
 	gofrHTTP "gofr.dev/pkg/gofr/http"
 	"gofr.dev/pkg/gofr/logging"
 	"gofr.dev/pkg/gofr/service"
+	"gofr.dev/pkg/gofr/testutil"
 )
 
+var port int
+
 func Test_main(t *testing.T) {
-	const host = "http://localhost:9001"
+	configs := testutil.NewServerConfigs(t)
+
 	c := &http.Client{}
 
 	go main()
-	time.Sleep(time.Second * 3)
+	time.Sleep(100 * time.Millisecond)
 
 	testCases := []struct {
 		desc        string
@@ -48,14 +54,14 @@ func Test_main(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		req, _ := http.NewRequest(http.MethodGet, host+tc.path, nil)
+		req, _ := http.NewRequest(http.MethodGet, configs.HTTPHost+tc.path, nil)
 		resp, err := c.Do(req)
 
-		assert.Nil(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 
-		assert.Nil(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 
 		assert.Equal(t, tc.expectedRes, string(bodyBytes), "TEST[%d], Failed.\n%s", i, tc.desc)
 
@@ -67,7 +73,7 @@ func Test_main(t *testing.T) {
 
 func TestHTTPHandlerURLError(t *testing.T) {
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
-		"http://localhost:5000/handle", bytes.NewBuffer([]byte(`{"key":"value"}`)))
+		fmt.Sprint("http://localhost:", port, "/handle"), bytes.NewBuffer([]byte(`{"key":"value"}`)))
 	gofrReq := gofrHTTP.NewRequest(req)
 
 	mockContainer, _ := container.NewMockContainer(t)
@@ -79,7 +85,7 @@ func TestHTTPHandlerURLError(t *testing.T) {
 	resp, err := Handler(ctx)
 
 	assert.Nil(t, resp)
-	assert.NotNil(t, err)
+	require.Error(t, err)
 }
 
 func TestHTTPHandlerResponseUnmarshalError(t *testing.T) {
@@ -92,7 +98,7 @@ func TestHTTPHandlerResponseUnmarshalError(t *testing.T) {
 
 	logger := logging.NewLogger(logging.DEBUG)
 
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost:5000/handle", bytes.NewBuffer([]byte(`{"key":"value"}`)))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprint("http://localhost:", port, "/handle"), bytes.NewBuffer([]byte(`{"key":"value"}`)))
 
 	gofrReq := gofrHTTP.NewRequest(req)
 
@@ -104,5 +110,5 @@ func TestHTTPHandlerResponseUnmarshalError(t *testing.T) {
 	resp, err := Handler(ctx)
 
 	assert.Nil(t, resp)
-	assert.NotNil(t, err)
+	require.Error(t, err)
 }

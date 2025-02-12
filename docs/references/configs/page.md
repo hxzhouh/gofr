@@ -1,6 +1,6 @@
 # GoFr Configuration Options
 
-This document lists all the configuration options supported by the Gofr framework. The configurations are grouped by category for better organization.
+This document lists all the configuration options supported by the GoFr framework. The configurations are grouped by category for better organization.
 
 ## App
 
@@ -65,19 +65,36 @@ This document lists all the configuration options supported by the Gofr framewor
 ---
 
 -  TRACE_EXPORTER
--  Tracing exporter to use. Supported values: gofr, zipkin, jaeger.
--  gofr
+-  Tracing exporter to use. Supported values: gofr, zipkin, jaeger, otlp.
 
 ---
 
 -  TRACER_HOST
 -  Hostname of the tracing collector. Required if TRACE_EXPORTER is set to zipkin or jaeger.
+-  **DEPRECATED**
 
 ---
 
 -  TRACER_PORT
 -  Port of the tracing collector. Required if TRACE_EXPORTER is set to zipkin or jaeger.
 -  9411
+-  **DEPRECATED**
+
+---
+
+-  TRACER_URL
+-  URL of the trace collector. Required if TRACE_EXPORTER is set to zipkin or jaeger.
+
+---
+
+-  TRACER_RATIO
+-  Refers to the proportion of traces that are exported through sampling. It is optional configuration. By default, this ratio is set to 1.
+
+---
+
+-  TRACER_AUTH_KEY
+-  Authorization header for trace exporter requests.
+-  Supported for zipkin, jaeger.
 
 ---
 
@@ -97,6 +114,16 @@ This document lists all the configuration options supported by the Gofr framewor
 
 -  REQUEST_TIMEOUT
 -  Set the request timeouts (in seconds) for HTTP server.
+
+---
+
+- CERT_FILE
+- Set the path to your PEM certificate file for the HTTPS server to establish a secure connection.
+
+--- 
+
+- KEY_FILE
+- Set the path to your PEM key file for the HTTPS server to establish a secure connection.
 
 {% /table %}
 
@@ -153,6 +180,11 @@ This document lists all the configuration options supported by the Gofr framewor
 -  DB_MAX_OPEN_CONNECTION
 -  Number of maximum connections which can be used with database.
 -  0 (unlimited)
+---
+
+-  DB_SSL_MODE
+-  Currently supported only for PostgreSQL, with Default certificate file.
+-  disable
 
 {% /table %}
 
@@ -173,6 +205,21 @@ This document lists all the configuration options supported by the Gofr framewor
 -  REDIS_PORT
 -  Port of the Redis server.
 
+---
+
+- REDIS_USER
+- Username for the Redis server.
+
+---
+
+- REDIS_PASSWORD
+- Password for the Redis server.
+
+---
+
+- REDIS_DB
+- Database number to use for the Redis server.
+
 {% /table %}
 
 ### Pub/Sub
@@ -188,7 +235,7 @@ This document lists all the configuration options supported by the Gofr framewor
 
 -  PUBSUB_BACKEND
 -  Pub/Sub message broker backend
--  kafka, google, mqtt
+-  kafka, google, mqtt, nats
 
 {% /table %}
 
@@ -218,6 +265,24 @@ This document lists all the configuration options supported by the Gofr framewor
 -  PUBSUB_OFFSET
 -  Offset to start consuming messages from. -1 for earliest, 0 for latest.
 -  -1
+
+---
+
+- KAFKA_BATCH_SIZE
+- Number of messages to batch before sending to Kafka
+- 1
+
+---
+
+- KAFKA_BATCH_BYTES
+- Number of bytes to batch before sending to Kafka
+- 1048576
+
+---
+
+- KAFKA_BATCH_TIMEOUT
+- Time to wait before sending a batch to Kafka
+- 100ms
 
 ---
 
@@ -300,5 +365,31 @@ This document lists all the configuration options supported by the Gofr framewor
 -  MQTT_QOS
 -  Quality of Service Level
 
+---
+
+-  MQTT_KEEP_ALIVE
+-  Sends regular messages to check the link is active. May not work as expected if handling func is blocking execution
+
 {% /table %}
 
+**NATS JetStream**
+
+{% table %}
+
+- Name
+- Description
+- Default Value
+
+---
+
+-  NATS_SERVER
+-  URL of the NATS server
+-  nats://localhost:4222
+
+---
+
+-  NATS_CREDS_FILE
+-  File containing the NATS credentials
+- creds.json
+
+{% /table %}

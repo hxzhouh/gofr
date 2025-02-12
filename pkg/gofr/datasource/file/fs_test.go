@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"io/fs"
 	"os"
+	"path"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
-	"gofr.dev/pkg/gofr/datasource"
 	"gofr.dev/pkg/gofr/logging"
 )
 
@@ -22,12 +23,12 @@ func Test_LocalFileSystemDirectoryCreation(t *testing.T) {
 	err := fileStore.Mkdir(dirName, os.ModePerm)
 	defer os.RemoveAll(dirName)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	fInfo, err := os.Stat(dirName)
 
-	assert.Nil(t, err)
-	assert.Equal(t, true, fInfo.IsDir())
+	require.NoError(t, err)
+	assert.True(t, fInfo.IsDir())
 }
 
 func Test_LocalFileOpenError(t *testing.T) {
@@ -65,11 +66,11 @@ func Test_CreateReadDeleteFile(t *testing.T) {
 
 	_, _ = newFile.Write([]byte("some content"))
 
-	defer func(fileStore datasource.FileSystem, name string) {
+	defer func(fileStore FileSystem, name string) {
 		_ = fileStore.Remove(name)
 	}(fileStore, fileName)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	tempFile, _ := fileStore.Open("temp.txt")
 
@@ -77,7 +78,7 @@ func Test_CreateReadDeleteFile(t *testing.T) {
 
 	_, err = tempFile.Read(reader)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(reader), "some content")
 }
 
@@ -90,14 +91,14 @@ func Test_CreateMoveDeleteFile(t *testing.T) {
 
 	_, err := fileStore.Create(fileName)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	err = fileStore.Rename("temp.txt", "temp.text")
-	defer func(fileStore datasource.FileSystem, name string) {
+	defer func(fileStore FileSystem, name string) {
 		_ = fileStore.Remove(name)
 	}(fileStore, "temp.text")
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 }
 
 func Test_CreateUpdateReadFile(t *testing.T) {
@@ -111,11 +112,11 @@ func Test_CreateUpdateReadFile(t *testing.T) {
 
 	_, _ = newFile.Write([]byte("some content"))
 
-	defer func(fileStore datasource.FileSystem, name string) {
+	defer func(fileStore FileSystem, name string) {
 		_ = fileStore.Remove(name)
 	}(fileStore, fileName)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	openedFile, _ := fileStore.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 	_, _ = openedFile.WriteAt([]byte("some new content"), 0)
@@ -126,7 +127,7 @@ func Test_CreateUpdateReadFile(t *testing.T) {
 	_, err = openedFile.Read(reader)
 	openedFile.Close()
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(reader), "some new content")
 }
 
@@ -149,7 +150,7 @@ func Test_CreateAndDeleteMultipleDirectories(t *testing.T) {
 
 	err := fileStore.RemoveAll("temp")
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 }
 
 func Test_ReadFromCSV(t *testing.T) {
@@ -177,7 +178,7 @@ Michael Brown,40,michaelb@example.com`
 	newCsvFile, _ = fileStore.Open("temp.csv")
 	reader, _ := newCsvFile.ReadAll()
 
-	defer func(fileStore datasource.FileSystem, name string) {
+	defer func(fileStore FileSystem, name string) {
 		_ = fileStore.RemoveAll(name)
 	}(fileStore, "temp.csv")
 
@@ -190,7 +191,7 @@ Michael Brown,40,michaelb@example.com`
 
 		assert.Equal(t, csvValue[i], content)
 
-		assert.Nil(t, err)
+		require.NoError(t, err)
 
 		i++
 	}
@@ -210,7 +211,7 @@ func Test_ReadFromCSVScanError(t *testing.T) {
 	newCsvFile, _ = fileStore.Open("temp.csv")
 	reader, _ := newCsvFile.ReadAll()
 
-	defer func(fileStore datasource.FileSystem, name string) {
+	defer func(fileStore FileSystem, name string) {
 		_ = fileStore.RemoveAll(name)
 	}(fileStore, "temp.csv")
 
@@ -219,7 +220,7 @@ func Test_ReadFromCSVScanError(t *testing.T) {
 
 		err := reader.Scan(content)
 
-		assert.NotNil(t, err)
+		require.Error(t, err)
 		assert.Equal(t, "", content)
 	}
 }
@@ -245,7 +246,7 @@ func Test_ReadFromJSONArray(t *testing.T) {
 	newCsvFile, _ = fileStore.Open("temp.json")
 	reader, _ := newCsvFile.ReadAll()
 
-	defer func(fileStore datasource.FileSystem, name string) {
+	defer func(fileStore FileSystem, name string) {
 		_ = fileStore.RemoveAll(name)
 	}(fileStore, "temp.json")
 
@@ -259,7 +260,7 @@ func Test_ReadFromJSONArray(t *testing.T) {
 		assert.Equal(t, jsonValue[i].Name, u.Name)
 		assert.Equal(t, jsonValue[i].Age, u.Age)
 
-		assert.Nil(t, err)
+		require.NoError(t, err)
 
 		i++
 	}
@@ -284,7 +285,7 @@ func Test_ReadFromJSONObject(t *testing.T) {
 	newCsvFile, _ = fileStore.Open("temp.json")
 	reader, _ := newCsvFile.ReadAll()
 
-	defer func(fileStore datasource.FileSystem, name string) {
+	defer func(fileStore FileSystem, name string) {
 		_ = fileStore.RemoveAll(name)
 	}(fileStore, "temp.json")
 
@@ -296,7 +297,7 @@ func Test_ReadFromJSONObject(t *testing.T) {
 		assert.Equal(t, "Sam", u.Name)
 		assert.Equal(t, 123, u.Age)
 
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	}
 }
 
@@ -315,9 +316,51 @@ func Test_ReadFromJSONArrayInvalidDelimiter(t *testing.T) {
 
 	_, err := newCsvFile.ReadAll()
 
-	defer func(fileStore datasource.FileSystem, name string) {
+	defer func(fileStore FileSystem, name string) {
 		_ = fileStore.RemoveAll(name)
 	}(fileStore, "temp.json")
 
 	assert.IsType(t, &json.SyntaxError{}, err)
+}
+
+func Test_DirectoryOperations(t *testing.T) {
+	logger := logging.NewMockLogger(logging.DEBUG)
+
+	fileStore := New(logger)
+
+	info, err := fileStore.Stat(".")
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
+
+	err = fileStore.Mkdir("Hello_world", os.ModePerm)
+	require.NoError(t, err)
+
+	defer func() {
+		removeErr := fileStore.RemoveAll("../Hello_world")
+		require.NoError(t, removeErr)
+	}()
+
+	err = fileStore.ChDir("Hello_world")
+	require.NoError(t, err)
+
+	dir, err := fileStore.Getwd()
+	require.NoError(t, err)
+	assert.Equal(t, "Hello_world", path.Base(dir))
+
+	// create a file in the directory.
+	_, err = fileStore.Create("Hello.txt")
+	require.NoError(t, err)
+
+	// ReadDir Operations
+	v, err := fileStore.ReadDir(".")
+	require.NoError(t, err)
+	require.NotEmpty(t, v)
+	assert.False(t, v[0].IsDir())
+	assert.Equal(t, "Hello.txt", v[0].Name())
+
+	v, err = fileStore.ReadDir("../Hello_world")
+	require.NoError(t, err)
+	require.NotEmpty(t, v)
+	assert.False(t, v[0].IsDir())
+	assert.Equal(t, "Hello.txt", v[0].Name())
 }

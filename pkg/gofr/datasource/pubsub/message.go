@@ -15,7 +15,7 @@ type Message struct {
 
 	Topic    string
 	Value    []byte
-	MetaData interface{}
+	MetaData any
 
 	Committer
 }
@@ -106,6 +106,10 @@ func (m *Message) bindStruct(i any) error {
 	return json.Unmarshal(m.Value, i)
 }
 
-func (m *Message) HostName() string {
+func (*Message) HostName() string {
 	return ""
+}
+
+func (*Message) Params(string) []string {
+	return nil
 }

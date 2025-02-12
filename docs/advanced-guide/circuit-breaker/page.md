@@ -26,10 +26,10 @@ func main() {
 
 	app.AddHTTPService("order", "https://order-func",
 		&service.CircuitBreakerConfig{
-		    // Number of consecutive failed requests after which circuit breaker will be enabled
+			// Number of consecutive failed requests after which circuit breaker will be enabled
 			Threshold: 4,
 			// Time interval at which circuit breaker will hit the aliveness endpoint.
-			Interval:  1 * time.Second,
+			Interval: 1 * time.Second,
 		},
 	)
 
@@ -42,3 +42,5 @@ func main() {
 
 Circuit breaker state changes to open when number of consecutive failed requests increases the threshold.
 When it is in open state, GoFr makes request to the aliveness endpoint (default being - /.well-known/alive) at an equal interval of time provided in config.
+
+> ##### Check out the example of an inter-service HTTP communication along with circuit-breaker in GoFr: [Visit GitHub](https://github.com/gofr-dev/gofr/blob/main/examples/using-http-service/main.go)

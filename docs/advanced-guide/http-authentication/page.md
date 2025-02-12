@@ -25,11 +25,11 @@ Use `EnableBasicAuth(username, password)` to configure GoFr with pre-defined cre
 ```go
 func main() {
 	app := gofr.New()
-    
+
 	app.EnableBasicAuth("admin", "secret_password") // Replace with your credentials
-    
+
 	app.GET("/protected-resource", func(c *gofr.Context) (interface{}, error) {
-		// Handle protected resource access 
+		// Handle protected resource access
 		return nil, nil
 	})
 
@@ -39,23 +39,23 @@ func main() {
 
 **2. Custom Validation Function**
 
-Use `EnableBasicAuthWithFunc(validationFunc)` to implement your own validation logic for credentials.
+Use `EnableBasicAuthWithValidator(validationFunc)` to implement your own validation logic for credentials.
 The `validationFunc` takes the username and password as arguments and returns true if valid, false otherwise.
 
 ```go
 func validateUser(c *container.Container, username, password string) bool {
-	// Implement your credential validation logic here 
-	// This example uses hardcoded credentials for illustration only   
-	return username == "john" && password == "doe123" 
-} 
+	// Implement your credential validation logic here
+	// This example uses hardcoded credentials for illustration only
+	return username == "john" && password == "doe123"
+}
 
-func main() { 
-	app := gofr.New() 
+func main() {
+	app := gofr.New()
 
-	app.EnableBasicAuthWithValidator(validateUser) 
+	app.EnableBasicAuthWithValidator(validateUser)
 
-	app.GET("/secure-data", func(c *gofr.Context) (interface{}, error) { 
-		// Handle access to secure data 
+	app.GET("/secure-data", func(c *gofr.Context) (interface{}, error) {
+		// Handle access to secure data
 		return nil, nil
 	})
 
@@ -97,7 +97,7 @@ func main() {
 ```
 
 **2. Custom Validation Function**
-- GoFr allows a custom validator function `apiKeyValidator(apiKey string) bool` for validating APIKeys and pass the func in **_EnableAPIKeyAuthWithFunc(validator)_**
+- GoFr allows a custom validator function `apiKeyValidator(apiKey string) bool` for validating APIKeys and pass the func in **_EnableAPIKeyAuthWithValidator(validator)_**
 
 ```go
 package main
@@ -146,10 +146,10 @@ Use `EnableOAuth(jwks-endpoint,refresh_interval)` to configure GoFr with pre-def
 func main() {
 	app := gofr.New()
 
-	app.EnableOAuth("http://jwks-endpoint", 20) 
-    
+	app.EnableOAuth("http://jwks-endpoint", 20)
+
 	app.GET("/protected-resource", func(c *gofr.Context) (interface{}, error) {
-		// Handle protected resource access 
+		// Handle protected resource access
 		return nil, nil
 	})
 

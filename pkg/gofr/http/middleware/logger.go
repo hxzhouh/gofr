@@ -61,8 +61,8 @@ func colorForStatusCode(status int) int {
 }
 
 type logger interface {
-	Log(...interface{})
-	Error(...interface{})
+	Log(...any)
+	Error(...any)
 }
 
 // Logging is a middleware which logs response status and time in milliseconds along with other data.
@@ -98,7 +98,9 @@ func Logging(logger logger) func(inner http.Handler) http.Handler {
 				}
 			}(srw, r)
 
-			defer panicRecovery(srw, logger)
+			defer func() {
+				panicRecovery(recover(), srw, logger)
+			}()
 
 			inner.ServeHTTP(srw, r)
 		})
@@ -124,27 +126,28 @@ type panicLog struct {
 	StackTrace string `json:"stack_trace,omitempty"`
 }
 
-func panicRecovery(w http.ResponseWriter, logger logger) {
-	re := recover()
-
-	if re != nil {
-		var e string
-		switch t := re.(type) {
-		case string:
-			e = t
-		case error:
-			e = t.Error()
-		default:
-			e = "Unknown panic type"
-		}
-		logger.Error(panicLog{
-			Error:      e,
-			StackTrace: string(debug.Stack()),
-		})
-
-		w.WriteHeader(http.StatusInternalServerError)
-
-		res := map[string]interface{}{"code": http.StatusInternalServerError, "status": "ERROR", "message": "Some unexpected error has occurred"}
-		_ = json.NewEncoder(w).Encode(res)
+func panicRecovery(re any, w http.ResponseWriter, logger logger) {
+	if re == nil {
+		return
 	}
+
+	var e string
+	switch t := re.(type) {
+	case string:
+		e = t
+	case error:
+		e = t.Error()
+	default:
+		e = "Unknown panic type"
+	}
+
+	logger.Error(panicLog{
+		Error:      e,
+		StackTrace: string(debug.Stack()),
+	})
+
+	w.WriteHeader(http.StatusInternalServerError)
+
+	res := map[string]any{"code": http.StatusInternalServerError, "status": "ERROR", "message": "Some unexpected error has occurred"}
+	_ = json.NewEncoder(w).Encode(res)
 }

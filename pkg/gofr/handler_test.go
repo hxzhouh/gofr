@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"gofr.dev/pkg/gofr/container"
 	gofrHTTP "gofr.dev/pkg/gofr/http"
 	"gofr.dev/pkg/gofr/http/response"
 	"gofr.dev/pkg/gofr/logging"
+	"gofr.dev/pkg/gofr/testutil"
 )
 
 var (
@@ -26,7 +28,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	testCases := []struct {
 		desc       string
 		method     string
-		data       interface{}
+		data       any
 		err        error
 		statusCode int
 		body       string
@@ -35,6 +37,8 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			`{}`},
 		{"method is get, data is mil, error is not nil", http.MethodGet, nil, errTest, http.StatusInternalServerError,
 			`{"error":{"message":"some error"}}`},
+		{"method is get, data is mil, error is http error", http.MethodGet, nil, gofrHTTP.ErrorEntityNotFound{}, http.StatusNotFound,
+			`{"error":{"message":"No entity found with : "}}`},
 		{"method is post, data is nil and error is nil", http.MethodPost, "Created", nil, http.StatusCreated,
 			`{"data":"Created"}`},
 		{"method is delete, data is nil and error is nil", http.MethodDelete, nil, nil, http.StatusNoContent,
@@ -49,7 +53,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		}
 
 		handler{
-			function: func(*Context) (interface{}, error) {
+			function: func(*Context) (any, error) {
 				return tc.data, tc.err
 			},
 			container: c,
@@ -64,11 +68,11 @@ func TestHandler_ServeHTTP_Timeout(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 
-	h := handler{requestTimeout: "1"}
+	h := handler{requestTimeout: 100 * time.Millisecond}
 
 	h.container = &container.Container{Logger: logging.NewLogger(logging.FATAL)}
-	h.function = func(*Context) (interface{}, error) {
-		time.Sleep(2 * time.Second)
+	h.function = func(*Context) (any, error) {
+		time.Sleep(200 * time.Millisecond)
 
 		return "hey", nil
 	}
@@ -87,7 +91,7 @@ func TestHandler_ServeHTTP_Panic(t *testing.T) {
 	h := handler{}
 
 	h.container = &container.Container{Logger: logging.NewLogger(logging.FATAL)}
-	h.function = func(*Context) (interface{}, error) {
+	h.function = func(*Context) (any, error) {
 		panic("runtime panic")
 	}
 
@@ -96,6 +100,68 @@ func TestHandler_ServeHTTP_Panic(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code, "TestHandler_ServeHTTP_Panic Failed")
 
 	assert.Contains(t, w.Body.String(), http.StatusText(http.StatusInternalServerError), "TestHandler_ServeHTTP_Panic Failed")
+}
+
+func TestHandler_ServeHTTP_WithHeaders(t *testing.T) {
+	testCases := []struct {
+		desc       string
+		method     string
+		data       any
+		headers    map[string]string
+		err        error
+		statusCode int
+		body       string
+	}{
+		{
+			desc:   "Response with headers, method is GET, no error",
+			method: http.MethodGet,
+			data: response.Response{
+				Headers: map[string]string{
+					"X-Custom-Header": "custom-value",
+					"Content-Type":    "application/json",
+				},
+				Data: map[string]string{
+					"message": "Hello, World!",
+				},
+			},
+			headers: map[string]string{
+				"X-Custom-Header": "custom-value",
+				"Content-Type":    "application/json",
+			},
+			statusCode: http.StatusOK,
+			body:       `{"message":"Hello, World!"}`,
+		},
+		{
+			desc:       "No headers, method is GET, data is simple string, no error",
+			method:     http.MethodGet,
+			data:       "simple string",
+			statusCode: http.StatusOK,
+			body:       `"simple string"`,
+		},
+	}
+
+	for i, tc := range testCases {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(tc.method, "/", http.NoBody)
+		c := &container.Container{
+			Logger: logging.NewLogger(logging.FATAL),
+		}
+
+		handler{
+			function: func(*Context) (any, error) {
+				return tc.data, tc.err
+			},
+			container: c,
+		}.ServeHTTP(w, r)
+
+		assert.Containsf(t, w.Body.String(), tc.body, "TEST[%d], Failed.\n%s", i, tc.desc)
+
+		assert.Equal(t, tc.statusCode, w.Code, "TEST[%d], Failed.\n%s", i, tc.desc)
+
+		for key, expectedValue := range tc.headers {
+			assert.Equal(t, expectedValue, w.Header().Get(key), "TEST[%d], Failed. Header mismatch: %s", i, key)
+		}
+	}
 }
 
 func TestHandler_faviconHandlerError(t *testing.T) {
@@ -126,12 +192,12 @@ func TestHandler_faviconHandlerError(t *testing.T) {
 
 	data, err := faviconHandler(&c)
 
-	assert.NoError(t, err, "TEST Failed.\n")
+	require.NoError(t, err, "TEST Failed.\n")
 
-	assert.Equal(t, data, response.File{
+	assert.Equal(t, response.File{
 		Content:     d,
 		ContentType: "image/x-icon",
-	}, "TEST Failed.\n")
+	}, data, "TEST Failed.\n")
 }
 
 func TestHandler_faviconHandler(t *testing.T) {
@@ -142,12 +208,12 @@ func TestHandler_faviconHandler(t *testing.T) {
 	d, _ := os.ReadFile("static/favicon.ico")
 	data, err := faviconHandler(&c)
 
-	assert.NoError(t, err, "TEST Failed.\n")
+	require.NoError(t, err, "TEST Failed.\n")
 
-	assert.Equal(t, data, response.File{
+	assert.Equal(t, response.File{
 		Content:     d,
 		ContentType: "image/x-icon",
-	}, "TEST Failed.\n")
+	}, data, "TEST Failed.\n")
 }
 
 func TestHandler_catchAllHandler(t *testing.T) {
@@ -157,7 +223,7 @@ func TestHandler_catchAllHandler(t *testing.T) {
 
 	data, err := catchAllHandler(&c)
 
-	assert.Equal(t, data, nil, "TEST Failed.\n")
+	assert.Nil(t, data, "TEST Failed.\n")
 
 	assert.Equal(t, gofrHTTP.ErrorInvalidRoute{}, err, "TEST Failed.\n")
 }
@@ -165,11 +231,13 @@ func TestHandler_catchAllHandler(t *testing.T) {
 func TestHandler_livelinessHandler(t *testing.T) {
 	resp, err := liveHandler(&Context{})
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, fmt.Sprint(resp), "UP")
 }
 
 func TestHandler_healthHandler(t *testing.T) {
+	testutil.NewServerConfigs(t)
+
 	a := New()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -188,6 +256,6 @@ func TestHandler_healthHandler(t *testing.T) {
 
 	h, err := healthHandler(ctx)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, h)
 }

@@ -7,13 +7,16 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
+
+	"gofr.dev/pkg/gofr/testutil"
 )
 
 func Test_WebSocket_Success(t *testing.T) {
-	wsURL := fmt.Sprintf("ws://%s/ws", "localhost:8001")
+	configs := testutil.NewServerConfigs(t)
+	wsURL := fmt.Sprintf("ws://localhost:%d/ws", configs.HTTPPort)
 
 	go main()
-	time.Sleep(time.Second * 2)
+	time.Sleep(100 * time.Millisecond)
 
 	testMessage := "Hello! GoFr"
 	dialer := &websocket.Dialer{}

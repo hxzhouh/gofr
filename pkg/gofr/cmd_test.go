@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"gofr.dev/pkg/gofr/cmd/terminal"
 	"gofr.dev/pkg/gofr/config"
 	"gofr.dev/pkg/gofr/container"
 	"gofr.dev/pkg/gofr/logging"
@@ -18,7 +19,7 @@ func Test_Run_SuccessCallRegisteredArgument(t *testing.T) {
 	c := cmd{}
 
 	c.addRoute("log",
-		func(c *Context) (interface{}, error) {
+		func(c *Context) (any, error) {
 			c.Logger.Info("handler called")
 			return nil, nil
 		},
@@ -39,7 +40,7 @@ func Test_Run_SuccessSkipEmptySpaceAndMatchCommandWithSpace(t *testing.T) {
 	c := cmd{}
 
 	c.addRoute("log",
-		func(c *Context) (interface{}, error) {
+		func(c *Context) (any, error) {
 			c.Logger.Info("handler called")
 			return nil, nil
 		},
@@ -59,9 +60,9 @@ func Test_Run_SuccessCommandWithMultipleParameters(t *testing.T) {
 	c := cmd{}
 
 	c.addRoute("log",
-		func(c *Context) (interface{}, error) {
-			assert.Equal(t, c.Request.Param("param"), "value")
-			assert.Equal(t, c.Request.Param("b"), "true")
+		func(c *Context) (any, error) {
+			assert.Equal(t, "value", c.Request.Param("param"))
+			assert.Equal(t, "true", c.Request.Param("b"))
 			c.Logger.Info("handler called")
 
 			return nil, nil
@@ -94,7 +95,7 @@ func Test_Run_SuccessRouteWithSpecialCharacters(t *testing.T) {
 		c := cmd{}
 
 		c.addRoute(tc.args[1],
-			func(c *Context) (interface{}, error) {
+			func(c *Context) (any, error) {
 				c.Logger.Info("handler called")
 				return nil, nil
 			},
@@ -124,7 +125,7 @@ func Test_Run_ErrorRouteWithSpecialCharacters(t *testing.T) {
 		c := cmd{}
 
 		c.addRoute(tc.args[1],
-			func(c *Context) (interface{}, error) {
+			func(c *Context) (any, error) {
 				c.Logger.Info("handler called")
 				return nil, nil
 			},
@@ -146,8 +147,8 @@ func Test_Run_ErrorParamNotReadWithoutHyphen(t *testing.T) {
 	c := cmd{}
 
 	c.addRoute("log",
-		func(c *Context) (interface{}, error) {
-			assert.Equal(t, c.Request.Param("hello"), "")
+		func(c *Context) (any, error) {
+			assert.Equal(t, "", c.Request.Param("hello"))
 			c.Logger.Info("handler called")
 
 			return nil, nil
@@ -180,7 +181,7 @@ func Test_Run_ErrorWhenOnlyParamAreGiven(t *testing.T) {
 	c := cmd{}
 
 	c.addRoute("-route",
-		func(c *Context) (interface{}, error) {
+		func(c *Context) (any, error) {
 			c.Logger.Info("handler called of route -route")
 			return nil, nil
 		},
@@ -234,7 +235,7 @@ func Test_Run_SuccessCallInvalidHyphens(t *testing.T) {
 	c := cmd{}
 
 	c.addRoute("log",
-		func(c *Context) (interface{}, error) {
+		func(c *Context) (any, error) {
 			c.Logger.Info("handler called")
 			return nil, nil
 		},
@@ -254,7 +255,7 @@ func Test_Run_HelpCommand(t *testing.T) {
 	c := cmd{}
 
 	c.addRoute("log",
-		func(c *Context) (interface{}, error) {
+		func(c *Context) (any, error) {
 			c.Logger.Info("handler called")
 			return nil, nil
 		},
@@ -277,7 +278,7 @@ func Test_Run_HelpCommandLong(t *testing.T) {
 	c := cmd{}
 
 	c.addRoute("log",
-		func(c *Context) (interface{}, error) {
+		func(c *Context) (any, error) {
 			c.Logger.Info("handler called")
 			return nil, nil
 		},
@@ -301,7 +302,7 @@ func Test_Run_UnknownCommandShowsHelp(t *testing.T) {
 	c := cmd{}
 
 	c.addRoute("log",
-		func(c *Context) (interface{}, error) {
+		func(c *Context) (any, error) {
 			c.Logger.Info("handler called")
 			return nil, nil
 		},
@@ -331,16 +332,18 @@ func Test_Run_handler_help(t *testing.T) {
 		os.Args = old
 	})
 
-	c := cmd{}
-
-	c.addRoute("hello", func(_ *Context) (interface{}, error) {
-		return "Hello", nil
-	}, AddHelp("this a helper string for hello sub command"))
-
 	out := testutil.StdoutOutputForFunc(func() {
+		c := cmd{
+			out: terminal.New(),
+		}
+
+		c.addRoute("hello", func(_ *Context) (any, error) {
+			return "Hello", nil
+		}, AddHelp("this a helper string for hello sub command"))
+
 		c.Run(container.NewContainer(config.NewMockConfig(map[string]string{})))
 	})
 
 	// check that only help for the hello subcommand is printed
-	assert.Equal(t, out, "this a helper string for hello sub command\n")
+	assert.Equal(t, "this a helper string for hello sub command\n", out)
 }

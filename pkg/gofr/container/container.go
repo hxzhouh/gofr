@@ -1,12 +1,27 @@
+/*
+Package container provides a centralized structure to manage common application-level concerns such as
+logging, connection pools, and service management. This package is designed to facilitate the sharing and
+management of these concerns across different parts of an application.
+
+Supported data sources:
+  - Databases (Cassandra, ClickHouse, MongoDB, DGraph, MySQL, PostgreSQL, SQLite)
+  - Key-value storages (Redis, BadgerDB)
+  - Pub/Sub systems (Azure Event Hub, Google as backend, Kafka, MQTT)
+  - Search engines (Solr)
+  - File systems (FTP, SFTP, S3)
+*/
 package container
 
 import (
+	"context"
+	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql" // This is required to be blank import
+
 	"gofr.dev/pkg/gofr/config"
-	"gofr.dev/pkg/gofr/datasource"
 	"gofr.dev/pkg/gofr/datasource/file"
 	"gofr.dev/pkg/gofr/datasource/pubsub"
 	"gofr.dev/pkg/gofr/datasource/pubsub/google"
@@ -20,6 +35,7 @@ import (
 	"gofr.dev/pkg/gofr/metrics/exporters"
 	"gofr.dev/pkg/gofr/service"
 	"gofr.dev/pkg/gofr/version"
+	"gofr.dev/pkg/gofr/websocket"
 )
 
 // Container is a collection of all common application level concerns. Things like Logger, Connection Pool for Redis
@@ -37,12 +53,19 @@ type Container struct {
 	Redis Redis
 	SQL   DB
 
-	// TODO : Move interfaces in container as it is being used by container and not datasources.
-	Cassandra  datasource.Cassandra
-	Clickhouse datasource.Clickhouse
-	Mongo      datasource.Mongo
+	Cassandra  CassandraWithContext
+	Clickhouse Clickhouse
+	Mongo      Mongo
+	Solr       Solr
+	DGraph     Dgraph
+	OpenTSDB   OpenTSDB
+	ScyllaDB   ScyllaDB
+	SurrealDB  SurrealDB
+	ArangoDB   ArangoDB
 
-	File datasource.FileSystem
+	KVStore KVStore
+
+	File file.FileSystem
 }
 
 func NewContainer(conf config.Config) *Container {
@@ -70,11 +93,20 @@ func (c *Container) Create(conf config.Config) {
 	}
 
 	if c.Logger == nil {
+		levelFetchConfig, err := strconv.Atoi(conf.GetOrDefault("REMOTE_LOG_FETCH_INTERVAL", "15"))
+		if err != nil {
+			levelFetchConfig = 15
+		}
+
 		c.Logger = remotelogger.New(logging.GetLevelFromString(conf.Get("LOG_LEVEL")), conf.Get("REMOTE_LOG_URL"),
-			conf.GetOrDefault("REMOTE_LOG_FETCH_INTERVAL", "15"))
+			time.Duration(levelFetchConfig)*time.Second)
+
+		if err != nil {
+			c.Logger.Error("invalid value for REMOTE_LOG_FETCH_INTERVAL. setting default of 15 sec.")
+		}
 	}
 
-	c.Debug("Container is being created")
+	c.Logger.Debug("Container is being created")
 
 	c.metricsManager = metrics.NewMetricsManager(exporters.Prometheus(c.GetAppName(), c.GetAppVersion()), c.Logger)
 
@@ -114,35 +146,66 @@ func (c *Container) Create(conf config.Config) {
 			SubscriptionName: conf.Get("GOOGLE_SUBSCRIPTION_NAME"),
 		}, c.Logger, c.metricsManager)
 	case "MQTT":
-		var qos byte
-
-		port, _ := strconv.Atoi(conf.Get("MQTT_PORT"))
-		order, _ := strconv.ParseBool(conf.GetOrDefault("MQTT_MESSAGE_ORDER", "false"))
-
-		switch conf.Get("MQTT_QOS") {
-		case "1":
-			qos = 1
-		case "2":
-			qos = 2
-		default:
-			qos = 0
-		}
-
-		configs := &mqtt.Config{
-			Protocol: conf.GetOrDefault("MQTT_PROTOCOL", "tcp"), // using tcp as default method to connect to broker
-			Hostname: conf.Get("MQTT_HOST"),
-			Port:     port,
-			Username: conf.Get("MQTT_USER"),
-			Password: conf.Get("MQTT_PASSWORD"),
-			ClientID: conf.Get("MQTT_CLIENT_ID_SUFFIX"),
-			QoS:      qos,
-			Order:    order,
-		}
-
-		c.PubSub = mqtt.New(configs, c.Logger, c.metricsManager)
+		c.PubSub = c.createMqttPubSub(conf)
 	}
 
 	c.File = file.New(c.Logger)
+}
+
+func (c *Container) Close() error {
+	var err error
+
+	if !isNil(c.SQL) {
+		err = errors.Join(err, c.SQL.Close())
+	}
+
+	if !isNil(c.Redis) {
+		err = errors.Join(err, c.Redis.Close())
+	}
+
+	if !isNil(c.PubSub) {
+		err = errors.Join(err, c.PubSub.Close())
+	}
+
+	return err
+}
+
+func (c *Container) createMqttPubSub(conf config.Config) pubsub.Client {
+	var qos byte
+
+	port, _ := strconv.Atoi(conf.Get("MQTT_PORT"))
+	order, _ := strconv.ParseBool(conf.GetOrDefault("MQTT_MESSAGE_ORDER", "false"))
+
+	keepAlive, err := time.ParseDuration(conf.Get("MQTT_KEEP_ALIVE"))
+	if err != nil {
+		keepAlive = 30 * time.Second
+
+		c.Logger.Debug("MQTT_KEEP_ALIVE is not set or invalid, setting it to 30 seconds")
+	}
+
+	switch conf.Get("MQTT_QOS") {
+	case "1":
+		qos = 1
+	case "2":
+		qos = 2
+	default:
+		qos = 0
+	}
+
+	configs := &mqtt.Config{
+		Protocol:     conf.GetOrDefault("MQTT_PROTOCOL", "tcp"), // using tcp as default method to connect to broker
+		Hostname:     conf.Get("MQTT_HOST"),
+		Port:         port,
+		Username:     conf.Get("MQTT_USER"),
+		Password:     conf.Get("MQTT_PASSWORD"),
+		ClientID:     conf.Get("MQTT_CLIENT_ID_SUFFIX"),
+		QoS:          qos,
+		Order:        order,
+		KeepAlive:    keepAlive,
+		CloseTimeout: 0 * time.Millisecond,
+	}
+
+	return mqtt.New(configs, c.Logger, c.metricsManager)
 }
 
 // GetHTTPService returns registered HTTP services.
@@ -203,4 +266,13 @@ func (c *Container) GetPublisher() pubsub.Publisher {
 
 func (c *Container) GetSubscriber() pubsub.Subscriber {
 	return c.PubSub
+}
+
+func (*Container) GetConnectionFromContext(ctx context.Context) *websocket.Connection {
+	conn, ok := ctx.Value(websocket.WSConnectionKey).(*websocket.Connection)
+	if !ok {
+		return nil
+	}
+
+	return conn
 }

@@ -2,6 +2,7 @@ package gofr
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"gofr.dev/pkg/gofr/config"
 	"gofr.dev/pkg/gofr/container"
@@ -43,9 +45,37 @@ func TestGofr_readConfig(t *testing.T) {
 	}
 }
 
+func TestGoFr_isPortAvailable(t *testing.T) {
+	configs := testutil.NewServerConfigs(t)
+
+	tests := []struct {
+		name        string
+		isAvailable bool
+	}{
+		{"Port is available", true},
+		{"Port is not available", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.isAvailable {
+				g := New()
+
+				go g.Run()
+				time.Sleep(100 * time.Millisecond)
+			}
+
+			isAvailable := isPortAvailable(configs.HTTPPort)
+			require.Equal(t, tt.isAvailable, isAvailable)
+		})
+	}
+}
+
 func TestGofr_ServerRoutes(t *testing.T) {
+	_ = testutil.NewServerConfigs(t)
+
 	type response struct {
-		Data interface{} `json:"data"`
+		Data any `json:"data"`
 	}
 
 	testCases := []struct {
@@ -68,32 +98,32 @@ func TestGofr_ServerRoutes(t *testing.T) {
 
 	g := New()
 
-	g.GET("/hello", func(*Context) (interface{}, error) {
+	g.GET("/hello", func(*Context) (any, error) {
 		return helloWorld, nil
 	})
 
 	// using add() func
-	g.add(http.MethodGet, "/hello2", func(*Context) (interface{}, error) {
+	g.add(http.MethodGet, "/hello2", func(*Context) (any, error) {
 		return helloWorld, nil
 	})
 
-	g.PUT("/hello", func(*Context) (interface{}, error) {
+	g.PUT("/hello", func(*Context) (any, error) {
 		return helloWorld, nil
 	})
 
-	g.POST("/hello", func(*Context) (interface{}, error) {
+	g.POST("/hello", func(*Context) (any, error) {
 		return helloWorld, nil
 	})
 
-	g.GET("/params", func(c *Context) (interface{}, error) {
+	g.GET("/params", func(c *Context) (any, error) {
 		return fmt.Sprintf("Hello %s!", c.Param("name")), nil
 	})
 
-	g.DELETE("/delete", func(*Context) (interface{}, error) {
+	g.DELETE("/delete", func(*Context) (any, error) {
 		return "Success", nil
 	})
 
-	g.PATCH("/patch", func(*Context) (interface{}, error) {
+	g.PATCH("/patch", func(*Context) (any, error) {
 		return "Success", nil
 	})
 
@@ -101,7 +131,7 @@ func TestGofr_ServerRoutes(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(tc.method, tc.target, http.NoBody)
 
-		r.Header.Set("content-type", "application/json")
+		r.Header.Set("Content-Type", "application/json")
 
 		g.httpServer.router.ServeHTTP(w, r)
 
@@ -118,31 +148,35 @@ func TestGofr_ServerRoutes(t *testing.T) {
 }
 
 func TestGofr_ServerRun(t *testing.T) {
+	configs := testutil.NewServerConfigs(t)
+
 	g := New()
 
-	g.GET("/hello", func(*Context) (interface{}, error) {
+	g.GET("/hello", func(*Context) (any, error) {
 		return helloWorld, nil
 	})
 
 	go g.Run()
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	var netClient = &http.Client{
-		Timeout: time.Second * 10,
+		Timeout: 200 * time.Millisecond,
 	}
 
 	re, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
-		"http://localhost:"+strconv.Itoa(defaultHTTPPort)+"/hello", http.NoBody)
+		"http://localhost:"+fmt.Sprint(configs.HTTPPort)+"/hello", http.NoBody)
 	resp, err := netClient.Do(re)
 
-	assert.NoError(t, err, "TEST Failed.\n")
+	require.NoError(t, err, "TEST Failed.\n")
 
-	assert.Equal(t, resp.StatusCode, http.StatusOK, "TEST Failed.\n")
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "TEST Failed.\n")
 
 	resp.Body.Close()
 }
 
 func Test_AddHTTPService(t *testing.T) {
+	_ = testutil.NewServerConfigs(t)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/test", r.URL.Path)
 
@@ -162,7 +196,11 @@ func Test_AddHTTPService(t *testing.T) {
 }
 
 func Test_AddDuplicateHTTPService(t *testing.T) {
+	configs := testutil.NewServerConfigs(t)
+
 	t.Setenv("LOG_LEVEL", "DEBUG")
+	t.Setenv("METRICS_PORT", strconv.Itoa(configs.MetricsPort))
+	t.Setenv("HTTP_PORT", strconv.Itoa(configs.HTTPPort))
 
 	logs := testutil.StdoutOutputForFunc(func() {
 		a := New()
@@ -175,12 +213,16 @@ func Test_AddDuplicateHTTPService(t *testing.T) {
 }
 
 func TestApp_Metrics(t *testing.T) {
+	testutil.NewServerConfigs(t)
+
 	app := New()
 
 	assert.NotNil(t, app.Metrics())
 }
 
 func TestApp_AddAndGetHTTPService(t *testing.T) {
+	testutil.NewServerConfigs(t)
+
 	app := New()
 
 	app.AddHTTPService("test-service", "http://test")
@@ -192,6 +234,8 @@ func TestApp_AddAndGetHTTPService(t *testing.T) {
 
 func TestApp_MigrateInvalidKeys(t *testing.T) {
 	logs := testutil.StderrOutputForFunc(func() {
+		testutil.NewServerConfigs(t)
+
 		app := New()
 		app.Migrate(map[int64]migration.Migrate{1: {}})
 	})
@@ -201,6 +245,8 @@ func TestApp_MigrateInvalidKeys(t *testing.T) {
 
 func TestApp_MigratePanicRecovery(t *testing.T) {
 	logs := testutil.StderrOutputForFunc(func() {
+		testutil.NewServerConfigs(t)
+
 		app := New()
 
 		app.container.PubSub = &container.MockPubSub{}
@@ -236,7 +282,7 @@ func Test_addRoute(t *testing.T) {
 		a := NewCMD()
 
 		// Add the "log" sub-command with its handler and description.
-		a.SubCommand("log", func(c *Context) (interface{}, error) {
+		a.SubCommand("log", func(c *Context) (any, error) {
 			c.Logger.Info("logging in handler")
 			return "handler called", nil
 		}, AddDescription("Logs a message"))
@@ -250,6 +296,8 @@ func Test_addRoute(t *testing.T) {
 }
 
 func TestEnableBasicAuthWithFunc(t *testing.T) {
+	port := testutil.GetFreePort(t)
+
 	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -260,6 +308,7 @@ func TestEnableBasicAuthWithFunc(t *testing.T) {
 	a := &App{
 		httpServer: &httpServer{
 			router: gofrHTTP.NewRouter(),
+			port:   port,
 		},
 		container: c,
 	}
@@ -294,7 +343,171 @@ func TestEnableBasicAuthWithFunc(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "TestEnableBasicAuthWithFunc Failed!")
 }
 
+func encodeBasicAuthorization(t *testing.T, arg string) string {
+	t.Helper()
+
+	data := []byte(arg)
+
+	dst := make([]byte, base64.StdEncoding.EncodedLen(len(data)))
+
+	base64.StdEncoding.Encode(dst, data)
+
+	s := "Basic " + string(dst)
+
+	return s
+}
+
+func Test_EnableBasicAuth(t *testing.T) {
+	port := testutil.GetFreePort(t)
+
+	mockContainer, _ := container.NewMockContainer(t)
+
+	tests := []struct {
+		name               string
+		args               []string
+		passedCredentials  string
+		expectedStatusCode int
+	}{
+		{
+			"No Authorization header passed",
+			[]string{"user1", "password1", "user2", "password2"},
+			"",
+			http.StatusUnauthorized,
+		},
+		{
+			"Even number of arguments",
+			[]string{"user1", "password1", "user2", "password2"},
+			"user1:password1",
+			http.StatusOK,
+		},
+		{
+			"Odd number of arguments with no authorization header passed",
+			[]string{"user1", "password1", "user2"},
+			"",
+			http.StatusOK,
+		},
+		{
+			"Odd number of arguments with wrong authorization header passed",
+			[]string{"user1", "password1", "user2"},
+			"user1:password2",
+			http.StatusOK,
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Initialize a new App instance
+			a := &App{
+				httpServer: &httpServer{
+					router: gofrHTTP.NewRouter(),
+					port:   port,
+				},
+				container: mockContainer,
+			}
+
+			a.httpServer.router.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprintln(w, "Hello, world!")
+			}))
+
+			a.EnableBasicAuth(tt.args...)
+
+			server := httptest.NewServer(a.httpServer.router)
+			defer server.Close()
+
+			client := server.Client()
+
+			// Create a mock HTTP request
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, http.NoBody)
+			require.NoError(t, err)
+
+			// Add a basic authorization header
+			req.Header.Add("Authorization", encodeBasicAuthorization(t, tt.passedCredentials))
+
+			// Send the HTTP request
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+
+			defer resp.Body.Close()
+
+			assert.Equal(t, tt.expectedStatusCode, resp.StatusCode, "TEST[%d], Failed.\n%s", i, tt.name)
+		})
+	}
+}
+
+func Test_EnableBasicAuthWithValidator(t *testing.T) {
+	port := testutil.GetFreePort(t)
+
+	mockContainer, _ := container.NewMockContainer(t)
+
+	tests := []struct {
+		name               string
+		passedCredentials  string
+		expectedStatusCode int
+	}{
+		{
+			"No Authorization header passed",
+			"",
+			http.StatusUnauthorized,
+		},
+		{
+			"Correct Authorization",
+			"user:password",
+			http.StatusOK,
+		},
+		{
+			"Wrong Authorization header passed",
+			"user2:password2",
+			http.StatusUnauthorized,
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Initialize a new App instance
+			a := &App{
+				httpServer: &httpServer{
+					router: gofrHTTP.NewRouter(),
+					port:   port,
+				},
+				container: mockContainer,
+			}
+
+			validateFunc := func(_ *container.Container, username string, password string) bool {
+				return username == "user" && password == "password"
+			}
+
+			a.EnableBasicAuthWithValidator(validateFunc)
+
+			a.httpServer.router.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprintln(w, "Hello, world!")
+			}))
+
+			server := httptest.NewServer(a.httpServer.router)
+			defer server.Close()
+
+			client := server.Client()
+
+			// Create a mock HTTP request
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, http.NoBody)
+			require.NoError(t, err)
+
+			// Add a basic authorization header
+			req.Header.Add("Authorization", encodeBasicAuthorization(t, tt.passedCredentials))
+
+			// Send the HTTP request
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+
+			defer resp.Body.Close()
+
+			assert.Equal(t, tt.expectedStatusCode, resp.StatusCode, "TEST[%d], Failed.\n%s", i, tt.name)
+		})
+	}
+}
+
 func Test_AddRESTHandlers(t *testing.T) {
+	testutil.NewServerConfigs(t)
+
 	app := New()
 
 	type user struct {
@@ -306,11 +519,13 @@ func Test_AddRESTHandlers(t *testing.T) {
 
 	tests := []struct {
 		desc  string
-		input interface{}
+		input any
 		err   error
 	}{
 		{"success case", &user{}, nil},
 		{"invalid object", &invalidObject, errInvalidObject},
+		{"invalid object", user{}, fmt.Errorf("failed to register routes for 'user' struct, %w", errNonPointerObject)},
+		{"invalid object", nil, errObjectIsNil},
 	}
 
 	for i, tc := range tests {
@@ -321,33 +536,43 @@ func Test_AddRESTHandlers(t *testing.T) {
 }
 
 func Test_initTracer(t *testing.T) {
-	mockConfig1 := config.NewMockConfig(map[string]string{
-		"TRACE_EXPORTER": "zipkin",
-		"TRACER_HOST":    "localhost",
-		"TRACER_PORT":    "2005",
-	})
+	createMockConfig := func(traceExporter, url, authKey string) config.Config {
+		return config.NewMockConfig(map[string]string{
+			"TRACE_EXPORTER":  traceExporter,
+			"TRACER_URL":      url,
+			"TRACER_AUTH_KEY": authKey,
+		})
+	}
+	mockConfig1 := createMockConfig("zipkin", "http://localhost:2005/api/v2/spans", "")
 
-	mockConfig2 := config.NewMockConfig(map[string]string{
-		"TRACE_EXPORTER": "jaeger",
-		"TRACER_HOST":    "localhost",
-		"TRACER_PORT":    "2005",
-	})
+	mockConfig2 := createMockConfig("zipkin", "http://localhost:2005/api/v2/spans", "valid-token")
 
-	mockConfig3 := config.NewMockConfig(map[string]string{
-		"TRACE_EXPORTER": "gofr",
-	})
+	mockConfig3 := createMockConfig("jaeger", "localhost:4317", "")
+
+	mockConfig4 := createMockConfig("jaeger", "localhost:4317", "valid-token")
+
+	mockConfig5 := createMockConfig("otlp", "localhost:4317", "")
+
+	mockConfig6 := createMockConfig("otlp", "localhost:4317", "valid-token")
+
+	mockConfig7 := createMockConfig("gofr", "", "")
 
 	tests := []struct {
 		desc               string
 		config             config.Config
 		expectedLogMessage string
 	}{
-		{"zipkin exporter", mockConfig1, "Exporting traces to zipkin."},
-		{"jaeger exporter", mockConfig2, "Exporting traces to jaeger."},
-		{"gofr exporter", mockConfig3, "Exporting traces to GoFr at https://tracer.gofr.dev"},
+		{"tracing disabled", config.NewMockConfig(nil), "tracing is disabled"},
+		{"zipkin exporter", mockConfig1, "Exporting traces to zipkin at http://localhost:2005/api/v2/spans"},
+		{"zipkin exporter with authkey", mockConfig2, "Exporting traces to zipkin at http://localhost:2005/api/v2/spans"},
+		{"jaeger exporter", mockConfig3, "Exporting traces to jaeger at localhost:4317"},
+		{"jaeger exporter with auth", mockConfig4, "Exporting traces to jaeger at localhost:4317"},
+		{"otlp exporter", mockConfig5, "Exporting traces to otlp at localhost:4317"},
+		{"otlp exporter with authKey", mockConfig6, "Exporting traces to otlp at localhost:4317"},
+		{"gofr exporter with default url", mockConfig7, "Exporting traces to GoFr at https://tracer.gofr.dev"},
 	}
 
-	for _, tc := range tests {
+	for i, tc := range tests {
 		logMessage := testutil.StdoutOutputForFunc(func() {
 			mockContainer, _ := container.NewMockContainer(t)
 
@@ -355,36 +580,53 @@ func Test_initTracer(t *testing.T) {
 				Config:    tc.config,
 				container: mockContainer,
 			}
-
 			a.initTracer()
 		})
-
-		assert.Contains(t, logMessage, tc.expectedLogMessage)
+		assert.Contains(t, logMessage, tc.expectedLogMessage, "TEST[%d], Failed.\n%s", i, tc.desc)
 	}
 }
 
 func Test_initTracer_invalidConfig(t *testing.T) {
-	mockConfig := config.NewMockConfig(map[string]string{
-		"TRACE_EXPORTER": "abc",
-		"TRACER_HOST":    "localhost",
-		"TRACER_PORT":    "2005",
-	})
+	createMockConfig := func(traceExporter, url, authKey string) config.Config {
+		return config.NewMockConfig(map[string]string{
+			"TRACE_EXPORTER":  traceExporter,
+			"TRACER_URL":      url,
+			"TRACER_AUTH_KEY": authKey,
+		})
+	}
+	mockConfig1 := createMockConfig("abc", "https://tracer-service.dev", "")
+	mockConfig2 := createMockConfig("", "https://tracer-service.dev", "")
+	mockConfig3 := createMockConfig("otlp", "", "")
 
-	errLogMessage := testutil.StderrOutputForFunc(func() {
-		mockContainer, _ := container.NewMockContainer(t)
+	testErr := []struct {
+		desc               string
+		config             config.Config
+		expectedLogMessage string
+	}{
+		{"unsupported trace_exporter", mockConfig1, "unsupported TRACE_EXPORTER: abc"},
+		{"missing trace_exporter", mockConfig2, "missing TRACE_EXPORTER config, should be provided with TRACER_URL to enable tracing"},
+		{"miss tracer_url ", mockConfig3,
+			"missing TRACER_URL config, should be provided with TRACE_EXPORTER to enable tracing"},
+	}
 
-		a := App{
-			Config:    mockConfig,
-			container: mockContainer,
-		}
+	for i, tc := range testErr {
+		logMessage := testutil.StderrOutputForFunc(func() {
+			mockContainer, _ := container.NewMockContainer(t)
 
-		a.initTracer()
-	})
+			a := App{
+				Config:    tc.config,
+				container: mockContainer,
+			}
+			a.initTracer()
+		})
 
-	assert.Contains(t, errLogMessage, "unsupported trace exporter.")
+		assert.Contains(t, logMessage, tc.expectedLogMessage, "TEST[%d], Failed.\n%s", i, tc.desc)
+	}
 }
 
 func Test_UseMiddleware(t *testing.T) {
+	port := testutil.GetFreePort(t)
+
 	testMiddleware := func(inner http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Test-Middleware", "applied")
@@ -397,7 +639,7 @@ func Test_UseMiddleware(t *testing.T) {
 	app := &App{
 		httpServer: &httpServer{
 			router: gofrHTTP.NewRouter(),
-			port:   8001,
+			port:   port,
 		},
 		container: c,
 		Config:    config.NewMockConfig(map[string]string{"REQUEST_TIMEOUT": "5"}),
@@ -405,19 +647,19 @@ func Test_UseMiddleware(t *testing.T) {
 
 	app.UseMiddleware(testMiddleware)
 
-	app.GET("/test", func(*Context) (interface{}, error) {
+	app.GET("/test", func(*Context) (any, error) {
 		return "success", nil
 	})
 
 	go app.Run()
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	var netClient = &http.Client{
-		Timeout: time.Second * 10,
+		Timeout: 200 * time.Millisecond,
 	}
 
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
-		"http://localhost:8001"+"/test", http.NoBody)
+		fmt.Sprintf("http://localhost:%d", port)+"/test", http.NoBody)
 
 	resp, err := netClient.Do(req)
 	if err != nil {
@@ -434,13 +676,68 @@ func Test_UseMiddleware(t *testing.T) {
 	assert.Equal(t, "applied", testHeaderValue, "Test_UseMiddleware Failed! header value mismatch.")
 }
 
+// Test the UseMiddlewareWithContainer function.
+func TestUseMiddlewareWithContainer(t *testing.T) {
+	port := testutil.GetFreePort(t)
+
+	// Initialize the mock container
+	mockContainer := container.NewContainer(config.NewMockConfig(nil))
+
+	// Create a simple handler to test middleware functionality
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Hello, world!"))
+	})
+
+	// Middleware to modify response and test container access
+	middleware := func(c *container.Container, handler http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Ensure the container is passed correctly (for this test, we are just logging)
+			assert.NotNil(t, c, "Container should not be nil in the middleware")
+
+			// Continue with the handler execution
+			handler.ServeHTTP(w, r)
+		})
+	}
+
+	// Create a new App with a mock server
+	app := &App{
+		httpServer: &httpServer{
+			router: gofrHTTP.NewRouter(),
+			port:   port,
+		},
+		container: mockContainer,
+		Config:    config.NewMockConfig(map[string]string{"REQUEST_TIMEOUT": "5"}),
+	}
+
+	// Use the middleware with the container
+	app.UseMiddlewareWithContainer(middleware)
+
+	// Register the handler to a route for testing
+	app.httpServer.router.Handle("/test", handler)
+
+	// Create a test request
+	req := httptest.NewRequest(http.MethodGet, "/test", http.NoBody)
+	// Create a test response recorder
+	rr := httptest.NewRecorder()
+
+	// Call the handler with the request and recorder
+	app.httpServer.router.ServeHTTP(rr, req)
+
+	// Assert the status code and response body
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "Hello, world!", rr.Body.String())
+}
+
 func Test_APIKeyAuthMiddleware(t *testing.T) {
+	port := testutil.GetFreePort(t)
+
 	c, _ := container.NewMockContainer(t)
 
 	app := &App{
 		httpServer: &httpServer{
 			router: gofrHTTP.NewRouter(),
-			port:   8001,
+			port:   port,
 		},
 		container: c,
 		Config:    config.NewMockConfig(map[string]string{"REQUEST_TIMEOUT": "5"}),
@@ -455,20 +752,20 @@ func Test_APIKeyAuthMiddleware(t *testing.T) {
 	app.EnableAPIKeyAuth(apiKeys...)
 	app.EnableAPIKeyAuthWithValidator(validateFunc)
 
-	app.GET("/test", func(_ *Context) (interface{}, error) {
+	app.GET("/test", func(_ *Context) (any, error) {
 		return "success", nil
 	})
 
 	go app.Run()
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	var netClient = &http.Client{
-		Timeout: time.Second * 10,
+		Timeout: 200 * time.Millisecond,
 	}
 
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
-		"http://localhost:8001/test", http.NoBody)
-	req.Header.Set("X-API-Key", "test-key")
+		fmt.Sprintf("http://localhost:%d", port)+"/test", http.NoBody)
+	req.Header.Set("X-Api-Key", "test-key")
 
 	// Send the request and check for successful response
 	resp, err := netClient.Do(req)
@@ -483,6 +780,8 @@ func Test_APIKeyAuthMiddleware(t *testing.T) {
 }
 
 func Test_SwaggerEndpoints(t *testing.T) {
+	configs := testutil.NewServerConfigs(t)
+
 	// Create the openapi.json file within the static directory
 	openAPIFilePath := filepath.Join("static", OpenAPIJSON)
 
@@ -501,17 +800,17 @@ func Test_SwaggerEndpoints(t *testing.T) {
 
 	app := New()
 	app.httpRegistered = true
-	app.httpServer.port = 8002
+	app.httpServer.port = configs.HTTPPort
 
 	go app.Run()
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	var netClient = &http.Client{
-		Timeout: time.Second * 5,
+		Timeout: 200 * time.Millisecond,
 	}
 
 	re, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
-		"http://localhost:8002"+"/.well-known/swagger", http.NoBody)
+		configs.HTTPHost+"/.well-known/swagger", http.NoBody)
 	resp, err := netClient.Do(re)
 
 	defer func() {
@@ -521,7 +820,7 @@ func Test_SwaggerEndpoints(t *testing.T) {
 		}
 	}()
 
-	assert.Nil(t, err, "Expected error to be nil, got : %v", err)
+	require.NoError(t, err, "Expected error to be nil, got : %v", err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "text/html; charset=utf-8", resp.Header.Get("Content-Type"))
 }
@@ -550,7 +849,7 @@ func Test_AddCronJob_Success(t *testing.T) {
 		ctx.Logger.Info("test-job-success")
 	})
 
-	assert.Equal(t, len(a.cron.jobs), 1)
+	assert.Len(t, a.cron.jobs, 1)
 
 	for _, j := range a.cron.jobs {
 		if j.name == "test-job" {
@@ -560,4 +859,251 @@ func Test_AddCronJob_Success(t *testing.T) {
 	}
 
 	assert.Truef(t, pass, "unable to add cron job to cron table")
+}
+
+func setupTestEnvironment(t *testing.T) (host string, htmlContent []byte) {
+	t.Helper()
+	configs := testutil.NewServerConfigs(t)
+
+	// Generating some files for testing
+	htmlContent = []byte("<html><head><title>Test Static File</title></head><body><p>Testing Static File</p></body></html>")
+
+	createPublicDirectory(t, defaultPublicStaticDir, htmlContent)
+
+	createPublicDirectory(t, "testdir", htmlContent)
+
+	app := New()
+
+	app.AddStaticFiles("gofrTest", "testdir")
+
+	app.httpRegistered = true
+	app.httpServer.port = configs.HTTPPort
+
+	go app.Run()
+	time.Sleep(100 * time.Millisecond)
+
+	host = configs.HTTPHost
+
+	return host, htmlContent
+}
+
+func TestStaticHandler(t *testing.T) {
+	const indexHTML = "indexTest.html"
+
+	host, htmlContent := setupTestEnvironment(t)
+
+	defer os.Remove("static/indexTest.html")
+	defer os.RemoveAll("testdir")
+
+	tests := []struct {
+		desc                       string
+		method                     string
+		path                       string
+		statusCode                 int
+		expectedBody               string
+		expectedBodyLength         int
+		expectedResponseHeaderType string
+	}{
+		{
+			desc: "check file content index.html", method: http.MethodGet, path: "/" + defaultPublicStaticDir + "/" + indexHTML,
+			statusCode: http.StatusOK, expectedBodyLength: len(htmlContent),
+			expectedResponseHeaderType: "text/html; charset=utf-8", expectedBody: string(htmlContent),
+		},
+		{
+			desc: "check public endpoint", method: http.MethodGet,
+			path: "/" + defaultPublicStaticDir, statusCode: http.StatusNotFound,
+		},
+		{
+			desc: "check file content index.html in custom dir", method: http.MethodGet, path: "/" + "gofrTest" + "/" + indexHTML,
+			statusCode: http.StatusOK, expectedBodyLength: len(htmlContent),
+			expectedResponseHeaderType: "text/html; charset=utf-8", expectedBody: string(htmlContent),
+		},
+		{
+			desc: "check public endpoint in custom dir", method: http.MethodGet, path: "/" + "gofrTest",
+			statusCode: http.StatusNotFound,
+		},
+	}
+
+	for i, tc := range tests {
+		request, err := http.NewRequestWithContext(context.Background(), tc.method, host+tc.path, http.NoBody)
+		if err != nil {
+			t.Fatalf("TEST[%d], Failed to create request, error: %s", i, err)
+		}
+
+		request.Header.Set("Content-Type", "application/json")
+
+		client := http.Client{}
+
+		resp, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("TEST[%d], Request failed, error: %s", i, err)
+		}
+
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("TEST[%d], Failed to read response body, error: %s", i, err)
+		}
+
+		body := string(bodyBytes)
+
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		assert.Equal(t, tc.statusCode, resp.StatusCode, "TEST[%d], Failed with Status Body.\n%s", i, tc.desc)
+
+		if tc.expectedBody != "" {
+			assert.Contains(t, body, tc.expectedBody, "TEST[%d], Failed with Expected Body.\n%s", i, tc.desc)
+		}
+
+		if tc.expectedBodyLength != 0 {
+			contentLength := resp.Header.Get("Content-Length")
+			assert.Equal(t, strconv.Itoa(tc.expectedBodyLength), contentLength, "TEST[%d], Failed at Content-Length.\n%s", i, tc.desc)
+		}
+
+		if tc.expectedResponseHeaderType != "" {
+			assert.Equal(t,
+				tc.expectedResponseHeaderType,
+				resp.Header.Get("Content-Type"),
+				"TEST[%d], Failed at Expected Content-Type.\n%s", i, tc.desc)
+		}
+
+		resp.Body.Close()
+	}
+}
+
+func TestStaticHandlerInvalidFilePath(t *testing.T) {
+	// Generating some files for testing
+	logs := testutil.StderrOutputForFunc(func() {
+		testutil.NewServerConfigs(t)
+
+		app := New()
+
+		app.AddStaticFiles("gofrTest", ".//,.!@#$%^&")
+	})
+
+	assert.Contains(t, logs, "no such file or directory")
+	assert.Contains(t, logs, "error in registering '/gofrTest' static endpoint")
+}
+
+func createPublicDirectory(t *testing.T, defaultPublicStaticDir string, htmlContent []byte) {
+	t.Helper()
+
+	const indexHTML = "indexTest.html"
+
+	directory := "./" + defaultPublicStaticDir
+	if _, err := os.Stat(directory); err != nil {
+		if err = os.Mkdir("./"+defaultPublicStaticDir, os.ModePerm); err != nil {
+			t.Fatalf("Couldn't create a "+defaultPublicStaticDir+" directory, error: %s", err)
+		}
+	}
+
+	file, err := os.Create(filepath.Join(directory, indexHTML))
+
+	if err != nil {
+		t.Fatalf("Couldn't create %s file", indexHTML)
+	}
+
+	_, err = file.Write(htmlContent)
+	if err != nil {
+		t.Fatalf("Couldn't write to %s file", indexHTML)
+	}
+
+	file.Close()
+}
+
+func Test_Shutdown(t *testing.T) {
+	logs := testutil.StdoutOutputForFunc(func() {
+		testutil.NewServerConfigs(t)
+
+		g := New()
+
+		g.GET("/hello", func(*Context) (any, error) {
+			return helloWorld, nil
+		})
+
+		go g.Run()
+		time.Sleep(10 * time.Millisecond)
+
+		err := g.Shutdown(context.Background())
+
+		require.NoError(t, err, "Test_Shutdown Failed!")
+	})
+
+	assert.Contains(t, logs, "Application shutdown complete", "Test_Shutdown Failed!")
+}
+
+func TestApp_SubscriberInitialize(t *testing.T) {
+	t.Run("subscriber is initialized", func(t *testing.T) {
+		testutil.NewServerConfigs(t)
+
+		app := New()
+
+		mockContainer := container.Container{
+			Logger: logging.NewLogger(logging.ERROR),
+			PubSub: mockSubscriber{},
+		}
+
+		app.container = &mockContainer
+
+		app.Subscribe("Hello", func(*Context) error {
+			// this is a test subscriber
+			return nil
+		})
+
+		_, ok := app.subscriptionManager.subscriptions["Hello"]
+
+		assert.True(t, ok)
+	})
+
+	t.Run("subscriber is not initialized", func(t *testing.T) {
+		testutil.NewServerConfigs(t)
+
+		app := New()
+		app.Subscribe("Hello", func(*Context) error {
+			// this is a test subscriber
+			return nil
+		})
+
+		_, ok := app.subscriptionManager.subscriptions["Hello"]
+
+		assert.False(t, ok)
+	})
+}
+
+func TestApp_Subscribe(t *testing.T) {
+	t.Run("topic is empty", func(t *testing.T) {
+		testutil.NewServerConfigs(t)
+
+		app := New()
+
+		mockContainer := container.Container{
+			Logger: logging.NewLogger(logging.ERROR),
+			PubSub: mockSubscriber{},
+		}
+
+		app.container = &mockContainer
+
+		app.Subscribe("", func(*Context) error { return nil })
+
+		_, ok := app.subscriptionManager.subscriptions[""]
+
+		assert.False(t, ok)
+	})
+
+	t.Run("handler is nil", func(t *testing.T) {
+		testutil.NewServerConfigs(t)
+
+		app := New()
+
+		mockContainer := container.Container{
+			Logger: logging.NewLogger(logging.ERROR),
+			PubSub: mockSubscriber{},
+		}
+
+		app.container = &mockContainer
+
+		app.Subscribe("Hello", nil)
+
+		_, ok := app.subscriptionManager.subscriptions["Hello"]
+
+		assert.False(t, ok)
+	})
 }

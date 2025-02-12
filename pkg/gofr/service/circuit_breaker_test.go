@@ -10,7 +10,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+
 	"gofr.dev/pkg/gofr/logging"
 	"gofr.dev/pkg/gofr/testutil"
 )
@@ -68,8 +70,8 @@ func TestHttpService_GetSuccessRequests(t *testing.T) {
 
 	resp, err := service.Get(context.Background(), "test", nil)
 
-	assert.Nil(t, err)
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 }
@@ -90,8 +92,8 @@ func TestHttpService_GetWithHeaderSuccessRequests(t *testing.T) {
 
 	resp, err := service.GetWithHeaders(context.Background(), "test", nil, nil)
 
-	assert.Nil(t, err)
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 }
@@ -117,10 +119,10 @@ func TestHttpService_GetCBOpenRequests(t *testing.T) {
 		resp, err := service.Get(context.Background(), tc.path, nil)
 
 		if tc.expectErr {
-			assert.NotNil(t, err)
+			require.Error(t, err)
 			assert.Nil(t, resp)
 		} else {
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			_ = resp.Body.Close()
 		}
@@ -148,10 +150,10 @@ func TestHttpService_GetWithHeaderCBOpenRequests(t *testing.T) {
 		resp, err := service.GetWithHeaders(context.Background(), tc.path, nil, nil)
 
 		if tc.expectErr {
-			assert.NotNil(t, err)
+			require.Error(t, err)
 			assert.Nil(t, resp)
 		} else {
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			_ = resp.Body.Close()
 		}
@@ -174,8 +176,8 @@ func TestHttpService_PutSuccessRequests(t *testing.T) {
 
 	resp, err := service.Put(context.Background(), "test", nil, nil)
 
-	assert.Nil(t, err)
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 }
@@ -196,8 +198,8 @@ func TestHttpService_PutWithHeaderSuccessRequests(t *testing.T) {
 
 	resp, err := service.PutWithHeaders(context.Background(), "test", nil, nil, nil)
 
-	assert.Nil(t, err)
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 }
@@ -223,10 +225,10 @@ func TestHttpService_PutCBOpenRequests(t *testing.T) {
 		resp, err := service.Put(context.Background(), tc.path, nil, nil)
 
 		if tc.expectErr {
-			assert.NotNil(t, err)
+			require.Error(t, err)
 			assert.Nil(t, resp)
 		} else {
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			_ = resp.Body.Close()
 		}
@@ -254,10 +256,10 @@ func TestHttpService_PutWithHeaderCBOpenRequests(t *testing.T) {
 		resp, err := service.PutWithHeaders(context.Background(), tc.path, nil, nil, nil)
 
 		if tc.expectErr {
-			assert.NotNil(t, err)
+			require.Error(t, err)
 			assert.Nil(t, resp)
 		} else {
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			_ = resp.Body.Close()
 		}
@@ -280,8 +282,8 @@ func TestHttpService_PatchSuccessRequests(t *testing.T) {
 
 	resp, err := service.Get(context.Background(), "test", nil)
 
-	assert.Nil(t, err)
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 }
@@ -302,8 +304,8 @@ func TestHttpService_PatchWithHeaderSuccessRequests(t *testing.T) {
 
 	resp, err := service.GetWithHeaders(context.Background(), "test", nil, nil)
 
-	assert.Nil(t, err)
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 }
@@ -329,10 +331,10 @@ func TestHttpService_PatchCBOpenRequests(t *testing.T) {
 		resp, err := service.Patch(context.Background(), tc.path, nil, nil)
 
 		if tc.expectErr {
-			assert.NotNil(t, err)
+			require.Error(t, err)
 			assert.Nil(t, resp)
 		} else {
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			_ = resp.Body.Close()
 		}
@@ -360,10 +362,10 @@ func TestHttpService_PatchWithHeaderCBOpenRequests(t *testing.T) {
 		resp, err := service.PatchWithHeaders(context.Background(), tc.path, nil, nil, nil)
 
 		if tc.expectErr {
-			assert.NotNil(t, err)
+			require.Error(t, err)
 			assert.Nil(t, resp)
 		} else {
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			_ = resp.Body.Close()
 		}
@@ -386,8 +388,8 @@ func TestHttpService_PostSuccessRequests(t *testing.T) {
 
 	resp, err := service.Post(context.Background(), "test", nil, nil)
 
-	assert.Nil(t, err)
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 }
@@ -408,8 +410,8 @@ func TestHttpService_PostWithHeaderSuccessRequests(t *testing.T) {
 
 	resp, err := service.PostWithHeaders(context.Background(), "test", nil, nil, nil)
 
-	assert.Nil(t, err)
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 }
@@ -435,10 +437,10 @@ func TestHttpService_PostCBOpenRequests(t *testing.T) {
 		resp, err := service.Post(context.Background(), tc.path, nil, nil)
 
 		if tc.expectErr {
-			assert.NotNil(t, err)
+			require.Error(t, err)
 			assert.Nil(t, resp)
 		} else {
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			_ = resp.Body.Close()
 		}
@@ -466,10 +468,10 @@ func TestHttpService_PostWithHeaderCBOpenRequests(t *testing.T) {
 		resp, err := service.PostWithHeaders(context.Background(), tc.path, nil, nil, nil)
 
 		if tc.expectErr {
-			assert.NotNil(t, err)
+			require.Error(t, err)
 			assert.Nil(t, resp)
 		} else {
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			_ = resp.Body.Close()
 		}
@@ -492,8 +494,8 @@ func TestHttpService_DeleteSuccessRequests(t *testing.T) {
 
 	resp, err := service.Delete(context.Background(), "test", nil)
 
-	assert.Nil(t, err)
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 }
@@ -514,8 +516,8 @@ func TestHttpService_DeleteWithHeaderSuccessRequests(t *testing.T) {
 
 	resp, err := service.DeleteWithHeaders(context.Background(), "test", nil, nil)
 
-	assert.Nil(t, err)
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 }
@@ -541,10 +543,10 @@ func TestHttpService_DeleteCBOpenRequests(t *testing.T) {
 		resp, err := service.Delete(context.Background(), tc.path, nil)
 
 		if tc.expectErr {
-			assert.NotNil(t, err)
+			require.Error(t, err)
 			assert.Nil(t, resp)
 		} else {
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			_ = resp.Body.Close()
 		}
@@ -572,10 +574,10 @@ func TestHttpService_DeleteWithHeaderCBOpenRequests(t *testing.T) {
 		resp, err := service.DeleteWithHeaders(context.Background(), tc.path, nil, nil)
 
 		if tc.expectErr {
-			assert.NotNil(t, err)
+			require.Error(t, err)
 			assert.Nil(t, resp)
 		} else {
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			_ = resp.Body.Close()
 		}
@@ -593,7 +595,7 @@ func (m *mockMetrics) RecordHistogram(ctx context.Context, name string, value fl
 type customTransport struct {
 }
 
-func (c *customTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+func (*customTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if r.URL.Path == "/.well-known/alive" || r.URL.Path == "/success" {
 		return &http.Response{
 			Body:       io.NopCloser(bytes.NewBufferString("Hello World")),

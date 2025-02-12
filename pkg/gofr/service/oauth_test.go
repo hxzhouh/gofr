@@ -9,24 +9,27 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 
 	"gofr.dev/pkg/gofr/logging"
 )
 
 func oAuthHTTPServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
 	// Start a test HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("Authorization")
 		token := strings.Split(header, " ")
 
-		parsedToken, _ := jwt.Parse(token[1], func(*jwt.Token) (interface{}, error) {
+		parsedToken, _ := jwt.Parse(token[1], func(*jwt.Token) (any, error) {
 			return []byte("my-secret-key"), nil
 		})
 
 		claims, _ := parsedToken.Claims.GetAudience()
 
-		assert.Equal(t, claims[0], "https://dev-zq6tvaxf3v7p0g7j.us.auth0.com/api/v2/")
+		assert.Equal(t, "https://dev-zq6tvaxf3v7p0g7j.us.auth0.com/api/v2/", claims[0])
 
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -83,8 +86,8 @@ func TestHttpService_GetSuccessRequestsOAuth(t *testing.T) {
 
 	resp, err := service.Get(context.Background(), "test", nil)
 
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, err)
 
 	_ = resp.Body.Close()
 }
@@ -96,8 +99,8 @@ func TestHttpService_PostSuccessRequestsOAuth(t *testing.T) {
 
 	resp, err := service.Post(context.Background(), "test", nil, nil)
 
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, err)
 
 	_ = resp.Body.Close()
 }
@@ -109,8 +112,8 @@ func TestHttpService_PatchSuccessRequestsOAuth(t *testing.T) {
 
 	resp, err := service.Patch(context.Background(), "test", nil, nil)
 
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, err)
 
 	_ = resp.Body.Close()
 }
@@ -122,8 +125,8 @@ func TestHttpService_PutSuccessRequestsOAuth(t *testing.T) {
 
 	resp, err := service.Put(context.Background(), "test", nil, nil)
 
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, err)
 
 	_ = resp.Body.Close()
 }
@@ -135,8 +138,8 @@ func TestHttpService_DeleteSuccessRequestsOAuth(t *testing.T) {
 
 	resp, err := service.Delete(context.Background(), "test", nil)
 
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, err)
 
 	_ = resp.Body.Close()
 }
@@ -147,7 +150,7 @@ func TestHttpService_DeleteRequestsOAuthError(t *testing.T) {
 	resp, err := service.Delete(context.Background(), "test", nil)
 
 	assert.Nil(t, resp)
-	assert.Contains(t, err.Error(), `unsupported protocol scheme`)
+	require.ErrorContains(t, err, `unsupported protocol scheme`)
 
 	if resp != nil {
 		resp.Body.Close()
@@ -160,7 +163,7 @@ func TestHttpService_PutRequestsOAuthError(t *testing.T) {
 	resp, err := service.Put(context.Background(), "test", nil, nil)
 
 	assert.Nil(t, resp)
-	assert.Contains(t, err.Error(), `unsupported protocol scheme`)
+	require.ErrorContains(t, err, `unsupported protocol scheme`)
 
 	if resp != nil {
 		resp.Body.Close()
@@ -173,7 +176,7 @@ func TestHttpService_PatchRequestsOAuthError(t *testing.T) {
 	resp, err := service.Patch(context.Background(), "test", nil, nil)
 
 	assert.Nil(t, resp)
-	assert.Contains(t, err.Error(), `unsupported protocol scheme`)
+	require.ErrorContains(t, err, `unsupported protocol scheme`)
 
 	if resp != nil {
 		resp.Body.Close()
@@ -186,7 +189,7 @@ func TestHttpService_PostRequestsOAuthError(t *testing.T) {
 	resp, err := service.Post(context.Background(), "test", nil, nil)
 
 	assert.Nil(t, resp)
-	assert.Contains(t, err.Error(), `unsupported protocol scheme`)
+	require.ErrorContains(t, err, `unsupported protocol scheme`)
 
 	if resp != nil {
 		resp.Body.Close()
@@ -199,7 +202,7 @@ func TestHttpService_GetRequestsOAuthError(t *testing.T) {
 	resp, err := service.Get(context.Background(), "test", nil)
 
 	assert.Nil(t, resp)
-	assert.Contains(t, err.Error(), `unsupported protocol scheme`)
+	require.ErrorContains(t, err, `unsupported protocol scheme`)
 
 	if resp != nil {
 		resp.Body.Close()

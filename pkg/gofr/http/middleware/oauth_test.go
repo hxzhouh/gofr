@@ -9,9 +9,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOAuthSuccess(t *testing.T) {
@@ -37,8 +39,57 @@ func TestOAuthSuccess(t *testing.T) {
 
 	resp, err := client.Do(req)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp.Body.Close()
+}
+
+func TestGetJwtClaims(t *testing.T) {
+	claims := []byte(`{"aud":"stage.kops.dev","iat":1257894000,"orig":"GOOGLE",` +
+		`"picture":"https://lh3.googleusercontent.com/a/ACg8ocKJ5DDA4zruzFlsQ9KvL` +
+		`jHDtbOT_hpVz0hEO8jSl2m7Myk=s96-c","sub":"rakshit.singh@zopsmart.com","sub-id"` +
+		`:"a6573e1d-abea-4863-acdb-6cf3626a4414","typ":"refresh_token"}`)
+
+	router := mux.NewRouter()
+	router.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		result, err := json.Marshal(r.Context().Value(JWTClaim))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_, err = w.Write(result)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}).Methods(http.MethodGet).Name("/test")
+	router.Use(OAuth(NewOAuth(OauthConfigs{Provider: &MockProvider{}, RefreshInterval: 10})))
+
+	server := httptest.NewServer(router)
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/test", http.NoBody)
+	req.Header.Set("Authorization", "Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6IjAwVFEwdlRpNVB1UnZscUZGY3dCeUc0WjBM"+
+		"dGREcUtJX0JWUFRrdnpleEUiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJzdGFnZS5rb3BzLmRldiIsImlhdCI6MTI1Nzg5NDAwMCwib3JpZyI6IkdP"+
+		"T0dMRSIsInBpY3R1cmUiOiJodHRwczovL2xoMy5nb29nbGV1c2VyY29udGVudC5jb20vYS9BQ2c4b2NLSjVEREE0enJ1ekZsc1E5S3ZMakhEdG"+
+		"JPVF9ocFZ6MGhFTzhqU2wybTdNeWs9czk2LWMiLCJzdWIiOiJyYWtzaGl0LnNpbmdoQHpvcHNtYXJ0LmNvbSIsInN1Yi1pZCI6ImE2NTczZTFkL"+
+		"WFiZWEtNDg2My1hY2RiLTZjZjM2MjZhNDQxNCIsInR5cCI6InJlZnJlc2hfdG9rZW4ifQ.NkYSi6KJtGA3js9dcN3UqJWfeJdB88p7cxclrc6"+
+		"fxJODlCalsbbwIr3QL4AR9i0ucJjmoTIipCwpdM1IYDjCd-ilf2mTp11Wba31XoH--8YLI9Ju0wbpYhtF3wa00NF1Ijt48ze09IJ6QtE-etm"+
+		"AN8T7izsXbPeSrFiN3NVQU87eGxc3bEQhEsV5u3E6j8EdVDv8xbwisETY-N0mDftZp0w8UCkQ7MarOrA5IaXs2MHyCETy5y9QFd4djppH9oFo"+
+		"y5-AtEZqzyHKfGMlerjtJp8uOgFso9FycGuO0TFhR4AaZGVZxB072Hu-71tbx7atXp3zmDdkK_jkg5aVepoU_Q")
+
+	client := http.Client{}
+
+	resp, err := client.Do(req)
+	result := make([]byte, len(claims))
+	_, _ = resp.Body.Read(result)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, claims, result)
 
 	resp.Body.Close()
 }
@@ -61,9 +112,9 @@ func TestOAuthInvalidTokenFormat(t *testing.T) {
 
 	respBody, _ := io.ReadAll(resp.Body)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-	assert.Contains(t, string(respBody), `Authorization header format must be Bearer {token}`)
+	assert.Contains(t, string(respBody), `authorization header format must be Bearer {token}`)
 
 	resp.Body.Close()
 }
@@ -85,9 +136,9 @@ func TestOAuthEmptyAuthHeader(t *testing.T) {
 
 	respBody, _ := io.ReadAll(resp.Body)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-	assert.Contains(t, string(respBody), `Authorization header is required`)
+	assert.Contains(t, string(respBody), `authorization header is required`)
 
 	resp.Body.Close()
 }
@@ -97,7 +148,7 @@ func TestOAuthMalformedToken(t *testing.T) {
 	router.HandleFunc("/test", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}).Methods(http.MethodGet).Name("/test")
-	router.Use(OAuth(NewOAuth(OauthConfigs{Provider: &MockProvider{}, RefreshInterval: 10})))
+	router.Use(OAuth(NewOAuth(OauthConfigs{Provider: &MockProvider{}, RefreshInterval: 1 * time.Millisecond})))
 
 	server := httptest.NewServer(router)
 
@@ -110,7 +161,7 @@ func TestOAuthMalformedToken(t *testing.T) {
 
 	respBody, _ := io.ReadAll(resp.Body)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	assert.Contains(t, string(respBody), `token is malformed: token contains an invalid number of segments`)
 
@@ -143,7 +194,7 @@ func TestOAuthJWKSKeyNotFound(t *testing.T) {
 
 	respBody, _ := io.ReadAll(resp.Body)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	assert.Contains(t, string(respBody), `token is unverifiable: error while executing keyfunc`)
 
@@ -198,7 +249,7 @@ func TestOAuthHTTPCallFailed(t *testing.T) {
 
 	resp, err := client.Do(req)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
 	resp.Body.Close()
@@ -228,7 +279,7 @@ func TestOAuthReadError(t *testing.T) {
 
 	resp, err := client.Do(req)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
 	resp.Body.Close()
@@ -258,7 +309,7 @@ func TestOAuthJSONUnmarshalError(t *testing.T) {
 
 	resp, err := client.Do(req)
 
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
 	resp.Body.Close()
@@ -267,10 +318,10 @@ func TestOAuthJSONUnmarshalError(t *testing.T) {
 type MockProvider struct {
 }
 
-func (m *MockProvider) GetWithHeaders(context.Context, string, map[string]interface{},
+func (*MockProvider) GetWithHeaders(context.Context, string, map[string]any,
 	map[string]string) (*http.Response, error) {
 	// Marshal the JSON body
-	responseBody := map[string]interface{}{
+	responseBody := map[string]any{
 		"keys": []map[string]string{
 			{
 				"kty": "RSA",
@@ -305,7 +356,7 @@ func (m *MockProvider) GetWithHeaders(context.Context, string, map[string]interf
 type MockErrorProvider struct {
 }
 
-func (m *MockErrorProvider) GetWithHeaders(context.Context, string, map[string]interface{},
+func (*MockErrorProvider) GetWithHeaders(context.Context, string, map[string]any,
 	map[string]string) (*http.Response, error) {
 	// Marshal the JSON body
 	return nil, oauthError{msg: "response error"}
@@ -322,13 +373,13 @@ func (o oauthError) Error() string {
 // CustomReader simulates an error during the Read operation.
 type CustomReader struct{}
 
-func (r *CustomReader) Read([]byte) (int, error) {
+func (*CustomReader) Read([]byte) (int, error) {
 	return 0, oauthError{msg: "read error"}
 }
 
 type MockReaderErrorProvider struct{}
 
-func (m *MockReaderErrorProvider) GetWithHeaders(context.Context, string, map[string]interface{},
+func (*MockReaderErrorProvider) GetWithHeaders(context.Context, string, map[string]any,
 	map[string]string) (*http.Response, error) {
 	// Create a custom reader that returns an error
 	body := &CustomReader{}
@@ -344,7 +395,7 @@ func (m *MockReaderErrorProvider) GetWithHeaders(context.Context, string, map[st
 
 type MockJSONResponseErrorProvider struct{}
 
-func (m *MockJSONResponseErrorProvider) GetWithHeaders(context.Context, string, map[string]interface{},
+func (*MockJSONResponseErrorProvider) GetWithHeaders(context.Context, string, map[string]any,
 	map[string]string) (*http.Response, error) {
 	// Create a body with invalid JSON
 	body := strings.NewReader("invalid JSON")

@@ -30,18 +30,22 @@ type DBConfig struct {
 	Password    string
 	Port        string
 	Database    string
+	SSLMode     string
 	MaxIdleConn int
 	MaxOpenConn int
+	Charset     string
 }
 
 func NewSQL(configs config.Config, logger datasource.Logger, metrics Metrics) *DB {
-	logger.Debugf("reading database configurations from config file")
-
 	dbConfig := getDBConfig(configs)
+
+	if dbConfig.Dialect == "" {
+		return nil
+	}
 
 	// if Hostname is not provided, we won't try to connect to DB
 	if dbConfig.Dialect != sqlite && dbConfig.HostName == "" {
-		logger.Debugf("not connecting to database as database configurations aren't available")
+		logger.Errorf("connection to %s failed: host name is empty.", dbConfig.Dialect)
 		return nil
 	}
 
@@ -63,13 +67,11 @@ func NewSQL(configs config.Config, logger datasource.Logger, metrics Metrics) *D
 
 	database := &DB{config: dbConfig, logger: logger, metrics: metrics}
 
-	logger.Debugf("connecting to '%s' user to '%s' database at '%s:%s'", database.config.User,
-		database.config.Database, database.config.HostName, database.config.Port)
+	printConnectionSuccessLog("connecting", database.config, logger)
 
 	database.DB, err = sql.Open(otelRegisteredDialect, dbConnectionString)
 	if err != nil {
-		database.logger.Errorf("could not open connection with '%s' user to '%s' database at '%s:%s', error: %v",
-			database.config.User, database.config.Database, database.config.HostName, database.config.Port, err)
+		printConnectionFailureLog("open connection with", database.config, database.logger, err)
 
 		return database
 	}
@@ -93,14 +95,12 @@ func NewSQL(configs config.Config, logger datasource.Logger, metrics Metrics) *D
 
 func pingToTestConnection(database *DB) *DB {
 	if err := database.DB.Ping(); err != nil {
-		database.logger.Errorf("could not connect with '%s' user to '%s' database at '%s:%s', error: %v",
-			database.config.User, database.config.Database, database.config.HostName, database.config.Port, err)
+		printConnectionFailureLog("connect", database.config, database.logger, err)
 
 		return database
 	}
 
-	database.logger.Logf("connected to '%s' database at '%s:%s'", database.config.Database,
-		database.config.HostName, database.config.Port)
+	printConnectionSuccessLog("connected", database.config, database.logger)
 
 	return database
 }
@@ -110,20 +110,19 @@ func retryConnection(database *DB) {
 
 	for {
 		if database.DB.Ping() != nil {
-			database.logger.Log("retrying SQL database connection")
+			database.logger.Info("retrying SQL database connection")
 
 			for {
-				if err := database.DB.Ping(); err != nil {
-					database.logger.Debugf("could not connect with '%s' user to '%s' database at '%s:%s', error: %v",
-						database.config.User, database.config.Database, database.config.HostName, database.config.Port, err)
-
-					time.Sleep(connRetryFrequencyInSeconds * time.Second)
-				} else {
-					database.logger.Logf("connected to '%s' database at '%s:%s'", database.config.Database,
-						database.config.HostName, database.config.Port)
+				err := database.DB.Ping()
+				if err == nil {
+					printConnectionSuccessLog("connected", database.config, database.logger)
 
 					break
 				}
+
+				printConnectionFailureLog("connect", database.config, database.logger, err)
+
+				time.Sleep(connRetryFrequencyInSeconds * time.Second)
 			}
 		}
 
@@ -161,22 +160,30 @@ func getDBConfig(configs config.Config) *DBConfig {
 		Database:    configs.Get("DB_NAME"),
 		MaxOpenConn: maxOpenConn,
 		MaxIdleConn: maxIdleConn,
+		// only for postgres
+		SSLMode: configs.GetOrDefault("DB_SSL_MODE", "disable"),
+		Charset: configs.Get("DB_CHARSET"),
 	}
 }
 
 func getDBConnectionString(dbConfig *DBConfig) (string, error) {
 	switch dbConfig.Dialect {
 	case "mysql":
-		return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8&parseTime=True&loc=Local&interpolateParams=true",
+		if dbConfig.Charset == "" {
+			dbConfig.Charset = "utf8"
+		}
+
+		return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=True&loc=Local&interpolateParams=true",
 			dbConfig.User,
 			dbConfig.Password,
 			dbConfig.HostName,
 			dbConfig.Port,
 			dbConfig.Database,
+			dbConfig.Charset,
 		), nil
 	case "postgres":
-		return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-			dbConfig.HostName, dbConfig.Port, dbConfig.User, dbConfig.Password, dbConfig.Database), nil
+		return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+			dbConfig.HostName, dbConfig.Port, dbConfig.User, dbConfig.Password, dbConfig.Database, dbConfig.SSLMode), nil
 	case sqlite:
 		s := strings.TrimSuffix(dbConfig.Database, ".db")
 
@@ -198,5 +205,27 @@ func pushDBMetrics(db *sql.DB, metrics Metrics) {
 
 			time.Sleep(frequency * time.Second)
 		}
+	}
+}
+
+func printConnectionSuccessLog(status string, dbconfig *DBConfig, logger datasource.Logger) {
+	logFunc := logger.Infof
+	if status != "connected" {
+		logFunc = logger.Debugf
+	}
+
+	if dbconfig.Dialect == sqlite {
+		logFunc("%s to '%s' database", status, dbconfig.Database)
+	} else {
+		logFunc("%s to '%s' user to '%s' database at '%s:%s'", status, dbconfig.User, dbconfig.Database, dbconfig.HostName, dbconfig.Port)
+	}
+}
+
+func printConnectionFailureLog(action string, dbconfig *DBConfig, logger datasource.Logger, err error) {
+	if dbconfig.Dialect == sqlite {
+		logger.Errorf("could not %s database '%s', error: %v", action, dbconfig.Database, err)
+	} else {
+		logger.Errorf("could not %s '%s' user to '%s' database at '%s:%s', error: %v",
+			action, dbconfig.User, dbconfig.Database, dbconfig.HostName, dbconfig.Port, err)
 	}
 }

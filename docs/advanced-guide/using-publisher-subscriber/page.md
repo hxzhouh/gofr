@@ -9,8 +9,8 @@ scaled and maintained according to its own requirement.
 
 ## Design choice
 
-In GoFr application if a user wants to use the Publisher-Subscriber design, it supports two message brokers—Apache Kafka
-and Google PubSub.
+In GoFr application if a user wants to use the Publisher-Subscriber design, it supports several message brokers, 
+including Apache Kafka, Google PubSub, MQTT, and NATS JetStream.
 The initialization of the PubSub is done in an IoC container which handles the PubSub client dependency.
 With this, the control lies with the framework and thus promotes modularity, testability, and re-usability.
 Users can do publish and subscribe to multiple topics in a single application, by providing the topic name.
@@ -24,7 +24,7 @@ Some of the configurations that are required to configure the PubSub backend tha
 that are specific for the type of message broker user wants to use. 
 `PUBSUB_BACKEND` defines which message broker the application needs to use.
 
-### KAFKA
+### Kafka
 
 #### Configs
 {% table %}
@@ -112,19 +112,19 @@ KAFKA_BATCH_TIMEOUT=300
 #### Docker setup
 ```shell
 docker run --name kafka-1 -p 9092:9092 \
- -e KAFKA_ENABLE_KRAFT=yes \
--e KAFKA_CFG_PROCESS_ROLES=broker,controller \
--e KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER \
--e KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 \
--e KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT \
--e KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:9092 \
--e KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true \
--e KAFKA_BROKER_ID=1 \
--e KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@127.0.0.1:9093 \
--e ALLOW_PLAINTEXT_LISTENER=yes \
--e KAFKA_CFG_NODE_ID=1 \
--v kafka_data:/bitnami \
-bitnami/kafka:3.4 
+	-e KAFKA_ENABLE_KRAFT=yes \
+	-e KAFKA_CFG_PROCESS_ROLES=broker,controller \
+	-e KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+	-e KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 \
+	-e KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT \
+	-e KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:9092 \
+	-e KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true \
+	-e KAFKA_BROKER_ID=1 \
+	-e KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@127.0.0.1:9093 \
+	-e ALLOW_PLAINTEXT_LISTENER=yes \
+	-e KAFKA_CFG_NODE_ID=1 \
+	-v kafka_data:/bitnami \
+	bitnami/kafka:3.4
 ```
 
 ### GOOGLE
@@ -140,8 +140,8 @@ GOOGLE_SUBSCRIPTION_NAME=order-consumer // unique subscription name to identify 
 ```shell
 docker pull gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
 docker run --name=gcloud-emulator -d -p 8086:8086 \
-       gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators gcloud beta emulators pubsub start --project=test123 \
-       --host-port=0.0.0.0:8086
+	gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators gcloud beta emulators pubsub start --project=test123 \
+	--host-port=0.0.0.0:8086
 ```
 > **Note**: To set GOOGLE_APPLICATION_CREDENTIAL - refer {% new-tab-link title="here" href="https://cloud.google.com/docs/authentication/application-default-credentials" /%}
 
@@ -152,8 +152,8 @@ docker run --name=gcloud-emulator -d -p 8086:8086 \
 
 #### Configs
 ```dotenv
-PUBSUB_BACKEND=MQTT            // using Mqtt as pubsub
-MQTT_HOST=localhost            // broker host url
+PUBSUB_BACKEND=MQTT            // using MQTT as pubsub
+MQTT_HOST=localhost            // broker host URL
 MQTT_PORT=1883                 // broker port
 MQTT_CLIENT_ID_SUFFIX=test     // suffix to a random generated client-id(uuid v4)
 
@@ -164,17 +164,164 @@ MQTT_USER=username       // authentication username
 MQTT_PASSWORD=password   // authentication password 
 ```
 > **Note** : If `MQTT_HOST` config is not provided, the application will connect to a public broker
-> {% new-tab-link title="HiveMQ" href="https://www.hivemq.com/mqtt/public-mqtt-broker/" /%}
+> {% new-tab-link title="EMQX Broker" href="https://www.emqx.com/en/mqtt/public-mqtt5-broker" /%}
 
 #### Docker setup
 ```shell 
 docker run -d \
-  --name mqtt \
-  -p 8883:8883 \
-  -v <path-to>/mosquitto.conf:/mosquitto/config/mosquitto.conf \
-  eclipse-mosquitto:latest
+	--name mqtt \
+	-p 8883:8883 \
+	-v \
+	eclipse-mosquitto:latest <path-to >/mosquitto.conf:/mosquitto/config/mosquitto.conf
 ```
 > **Note**: find the default mosquitto config file {% new-tab-link title="here" href="https://github.com/eclipse/mosquitto/blob/master/mosquitto.conf" /%}
+ 
+### NATS JetStream
+
+NATS JetStream is supported as an external PubSub provider, meaning if you're not using it, it won't be added to your binary.
+
+**References**
+
+https://docs.nats.io/
+https://docs.nats.io/nats-concepts/jetstream
+https://docs.nats.io/using-nats/developer/connecting/creds
+
+#### Configs
+```dotenv
+PUBSUB_BACKEND=NATS
+PUBSUB_BROKER=nats://localhost:4222
+NATS_STREAM=mystream
+NATS_SUBJECTS=orders.*,shipments.*
+NATS_MAX_WAIT=5s
+NATS_MAX_PULL_WAIT=500ms
+NATS_CONSUMER=my-consumer
+NATS_CREDS_FILE=/path/to/creds.json
+```
+
+#### Setup
+
+To set up NATS JetStream, follow these steps:
+
+1. Import the external driver for NATS JetStream:
+
+```bash
+go get gofr.dev/pkg/gofr/datasources/pubsub/nats
+```
+
+2. Use the `AddPubSub` method to add the NATS JetStream driver to your application:
+
+```go   
+app := gofr.New()
+
+app.AddPubSub(nats.New(nats.Config{
+    Server:     "nats://localhost:4222",
+    Stream: nats.StreamConfig{
+        Stream:   "mystream",
+        Subjects: []string{"orders.*", "shipments.*"},
+    },
+    MaxWait:     5 * time.Second,
+    MaxPullWait: 500 * time.Millisecond,
+    Consumer:    "my-consumer",
+    CredsFile:   "/path/to/creds.json",
+}))
+```
+
+#### Docker setup
+```shell
+docker run -d \
+	--name nats \
+	-p 4222:4222 \
+	-p 8222:8222 \
+	-v \
+	nats:2.9.16 <path-to >/nats.conf:/nats/config/nats.conf
+```
+
+#### Configuration Options
+
+| Name | Description | Required | Default | Example |
+|------|-------------|----------|---------|---------|
+| `PUBSUB_BACKEND` | Set to "NATS" to use NATS JetStream as the message broker | Yes | - | `NATS` |
+| `PUBSUB_BROKER` | NATS server URL | Yes | - | `nats://localhost:4222` |
+| `NATS_STREAM` | Name of the NATS stream | Yes | - | `mystream` |
+| `NATS_SUBJECTS` | Comma-separated list of subjects to subscribe to | Yes | - | `orders.*,shipments.*` |
+| `NATS_MAX_WAIT` | Maximum wait time for batch requests | No | - | `5s` |
+| `NATS_MAX_PULL_WAIT` | Maximum wait time for individual pull requests | No | 0 | `500ms` |
+| `NATS_CONSUMER` | Name of the NATS consumer | No | - | `my-consumer` |
+| `NATS_CREDS_FILE` | Path to the credentials file for authentication | No | - | `/path/to/creds.json` |
+
+#### Usage
+
+When subscribing or publishing using NATS JetStream, make sure to use the appropriate subject name that matches your stream configuration.
+For more information on setting up and using NATS JetStream, refer to the official NATS documentation.
+
+### Azure Event Hub
+GoFr supports Event Hub starting gofr version v1.22.0.
+
+While subscribing gofr reads from all the partitions of the consumer group provided in the configuration reducing hassle to manage them.
+
+#### Configs
+
+Azure Event Hub is supported as an external PubSub provider such that if you are not using it, it doesn't get added in your binary.
+
+Import the external driver for `eventhub` using the following command.
+
+```bash
+go get gofr.dev/pkg/gofr/datasources/pubsub/eventhub
+```
+
+Use the `AddPubSub` method of GoFr's app to connect
+
+**Example**
+```go
+app := gofr.New()
+    
+    app.AddPubSub(eventhub.New(eventhub.Config{
+       ConnectionString:          "Endpoint=sb://gofr-dev.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=<key>",
+       ContainerConnectionString: "DefaultEndpointsProtocol=https;AccountName=gofrdev;AccountKey=<key>;EndpointSuffix=core.windows.net",
+       StorageServiceURL:         "https://gofrdev.windows.net/",
+       StorageContainerName:      "test",
+       EventhubName:              "test1",
+    }))
+```
+
+While subscribing/publishing from Event Hub make sure to keep the topic-name same as event-hub name.
+
+#### Setup
+
+1. To set up Azure Event Hub refer the following [documentation](https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-create).
+
+2. As GoFr manages reading from all the partitions it needs to store the information about what has been read and what is left for that GoFr uses Azure Container which can be setup from the following [documentation](https://learn.microsoft.com/en-us/azure/storage/blobs/blob-containers-portal).
+
+##### Mandatory Configs Configuration Map
+{% table %}
+- ConnectionString
+- [connection-string-primary-key](https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-get-connection-string)
+
+---
+
+- ContainerConnectionString
+- [ConnectionString](https://learn.microsoft.com/en-us/azure/storage/common/storage-account-keys-manage?toc=%2Fazure%2Fstorage%2Fblobs%2Ftoc.json&bc=%2Fazure%2Fstorage%2Fblobs%2Fbreadcrumb%2Ftoc.json&tabs=azure-portal#view-account-access-keys)
+
+
+---
+
+- StorageServiceURL
+- [Blob Service URL](https://learn.microsoft.com/en-us/azure/storage/common/storage-account-get-info?tabs=portal#get-service-endpoints-for-the-storage-account)
+
+---
+
+- StorageContainerName
+- [Container Name](https://learn.microsoft.com/en-us/azure/storage/blobs/blob-containers-portal#create-a-container)
+
+---
+
+- EventhubName
+- [Eventhub](https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-create#create-an-event-hub)
+
+{% /table %}
+
+#### Example
+
 
 ## Subscribing
 Adding a subscriber is similar to adding an HTTP handler, which makes it easier to develop scalable applications,
@@ -228,7 +375,7 @@ func main() {
 		err := c.Bind(&orderStatus)
 		if err != nil {
 			c.Logger.Error(err)
-			
+
 			// returning nil here as we would like to ignore the
 			// incompatible message and continue reading forward
 			return nil
@@ -273,7 +420,7 @@ func main() {
 	app.Run()
 }
 
-func order(ctx *gofr.Context) (interface{}, error) {
+func order(ctx *gofr.Context) (any, error) {
 	type orderStatus struct {
 		OrderId string `json:"orderId"`
 		Status  string `json:"status"`
@@ -296,3 +443,6 @@ func order(ctx *gofr.Context) (interface{}, error) {
 	return "Published", nil
 }
 ```
+> #### Check out the following examples on how to publish/subscribe to given topics:
+> ##### [Subscribing Topics](https://github.com/gofr-dev/gofr/blob/main/examples/using-subscriber/main.go)
+> ##### [Publishing Topics](https://github.com/gofr-dev/gofr/blob/main/examples/using-publisher/main.go)

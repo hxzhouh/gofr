@@ -29,7 +29,7 @@ func TestRequest_Bind(t *testing.T) {
 
 	_ = r.Bind(&a)
 
-	if a.Name != "gofr" || a.Valid != true || a.Value != 12 {
+	if a.Name != "gofr" || !a.Valid || a.Value != 12 {
 		t.Errorf("TEST Failed.\nGot: %v\n%s", a, "Request Bind error")
 	}
 
@@ -68,4 +68,16 @@ func TestHostName(t *testing.T) {
 	result := r.HostName()
 
 	assert.Equal(t, hostname, result, "TestHostName Failed!")
+}
+
+func Test_Params(t *testing.T) {
+	args := []string{"--category=books,electronics", "--tag=tech,science"}
+	r := NewRequest(args)
+
+	expectedCategories := []string{"books", "electronics"}
+	expectedTags := []string{"tech", "science"}
+
+	assert.ElementsMatch(t, expectedCategories, r.Params("category"), "expected all values of 'category' to match")
+	assert.ElementsMatch(t, expectedTags, r.Params("tag"), "expected all values of 'tag' to match")
+	assert.Empty(t, r.Params("nonexistent"), "expected empty slice for none-existent query param")
 }

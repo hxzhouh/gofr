@@ -7,12 +7,16 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"gofr.dev/pkg/gofr/testutil"
 )
 
 func TestExampleMigration(t *testing.T) {
-	const host = "http://localhost:9100"
+	configs := testutil.NewServerConfigs(t)
+
 	go main()
-	time.Sleep(time.Second * 3) // Giving some time to start the server
+	time.Sleep(100 * time.Millisecond) // Giving some time to start the server
 
 	tests := []struct {
 		desc       string
@@ -33,12 +37,12 @@ func TestExampleMigration(t *testing.T) {
 	}
 
 	for i, tc := range tests {
-		req, _ := http.NewRequest(tc.method, host+tc.path, bytes.NewBuffer(tc.body))
+		req, _ := http.NewRequest(tc.method, configs.HTTPHost+tc.path, bytes.NewBuffer(tc.body))
 		req.Header.Set("content-type", "application/json")
 		c := http.Client{}
 		resp, err := c.Do(req)
 
-		assert.Nil(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 
 		assert.Equal(t, tc.statusCode, resp.StatusCode, "TEST[%d], Failed.\n%s", i, tc.desc)
 	}

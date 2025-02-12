@@ -1,14 +1,13 @@
 package middleware
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"strings"
 
 	"gofr.dev/pkg/gofr/container"
 )
-
-const credentialLength = 2
 
 // BasicAuthProvider represents a basic authentication provider.
 type BasicAuthProvider struct {
@@ -17,6 +16,8 @@ type BasicAuthProvider struct {
 	ValidateFuncWithDatasources func(c *container.Container, username, password string) bool
 	Container                   *container.Container
 }
+
+const Username authMethod = 1
 
 // BasicAuthMiddleware creates a middleware function that enforces basic authentication using the provided BasicAuthProvider.
 func BasicAuthMiddleware(basicAuthProvider BasicAuthProvider) func(handler http.Handler) http.Handler {
@@ -27,51 +28,59 @@ func BasicAuthMiddleware(basicAuthProvider BasicAuthProvider) func(handler http.
 				return
 			}
 
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
-				http.Error(w, "Unauthorized: Authorization header missing", http.StatusUnauthorized)
+			username, password, ok := parseBasicAuth(r)
+			if !ok {
+				http.Error(w, "Unauthorized: Invalid or missing Authorization header", http.StatusUnauthorized)
 				return
 			}
 
-			authParts := strings.Split(authHeader, " ")
-			if len(authParts) != 2 || authParts[0] != "Basic" {
-				http.Error(w, "Unauthorized: Invalid Authorization header", http.StatusUnauthorized)
-				return
-			}
-
-			payload, err := base64.StdEncoding.DecodeString(authParts[1])
-			if err != nil {
-				http.Error(w, "Unauthorized: Invalid credentials format", http.StatusUnauthorized)
-				return
-			}
-
-			credentials := strings.Split(string(payload), ":")
-			if len(credentials) != credentialLength {
-				http.Error(w, "Unauthorized: Invalid credentials", http.StatusUnauthorized)
-				return
-			}
-
-			if !validateCredentials(basicAuthProvider, credentials) {
+			if !validateCredentials(basicAuthProvider, username, password) {
 				http.Error(w, "Unauthorized: Invalid username or password", http.StatusUnauthorized)
 				return
 			}
 
-			handler.ServeHTTP(w, r)
+			ctx := context.WithValue(r.Context(), Username, username)
+			handler.ServeHTTP(w, r.Clone(ctx))
 		})
 	}
 }
 
-func validateCredentials(provider BasicAuthProvider, credentials []string) bool {
-	if provider.ValidateFunc != nil && !provider.ValidateFunc(credentials[0], credentials[1]) {
-		return false
+// parseBasicAuth extracts and decodes the username and password from the Authorization header.
+func parseBasicAuth(r *http.Request) (username, password string, ok bool) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return "", "", false
 	}
 
-	if provider.ValidateFuncWithDatasources != nil && !provider.ValidateFuncWithDatasources(provider.Container,
-		credentials[0], credentials[1]) {
-		return false
+	scheme, credentials, found := strings.Cut(authHeader, " ")
+	if !found || scheme != "Basic" {
+		return "", "", false
 	}
 
-	storedPass, ok := provider.Users[credentials[0]]
+	payload, err := base64.StdEncoding.DecodeString(credentials)
+	if err != nil {
+		return "", "", false
+	}
 
-	return ok && storedPass == credentials[1]
+	username, password, found = strings.Cut(string(payload), ":")
+	if !found { // Ensure both username and password are returned as empty if colon separator is missing
+		return "", "", false
+	}
+
+	return username, password, true
+}
+
+// validateCredentials checks the provided username and password against the BasicAuthProvider.
+func validateCredentials(provider BasicAuthProvider, username, password string) bool {
+	if provider.ValidateFunc != nil && provider.ValidateFunc(username, password) {
+		return true
+	}
+
+	if provider.ValidateFuncWithDatasources != nil && provider.ValidateFuncWithDatasources(provider.Container, username, password) {
+		return true
+	}
+
+	storedPass, ok := provider.Users[username]
+
+	return ok && storedPass == password
 }

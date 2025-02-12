@@ -3,29 +3,32 @@ package http
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"gofr.dev/pkg/gofr/file"
 )
 
 func TestParam(t *testing.T) {
-	req := NewRequest(httptest.NewRequest("GET", "/abc?a=b", http.NoBody))
+	req := NewRequest(httptest.NewRequest(http.MethodGet, "/abc?a=b", http.NoBody))
 	if req.Param("a") != "b" {
 		t.Error("Can not parse the request params")
 	}
 }
 
 func TestBind(t *testing.T) {
-	r := httptest.NewRequest("POST", "/abc", strings.NewReader(`{"a": "b", "b": 5}`))
-	r.Header.Set("content-type", "application/json")
+	r := httptest.NewRequest(http.MethodPost, "/abc", strings.NewReader(`{"a": "b", "b": 5}`))
+	r.Header.Set("Content-Type", "application/json")
 	req := NewRequest(r)
 
 	x := struct {
@@ -72,16 +75,16 @@ func TestBind_FileSuccess(t *testing.T) {
 	}{}
 
 	err := r.Bind(&x)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	// Assert zip file bind
-	assert.Equal(t, 2, len(x.Zip.Files))
+	assert.Len(t, x.Zip.Files, 2)
 	assert.Equal(t, "Hello! This is file A.\n", string(x.Zip.Files["a.txt"].Bytes()))
 	assert.Equal(t, "Hello! This is file B.\n\n", string(x.Zip.Files["b.txt"].Bytes()))
 
 	// Assert zip file bind for pointer
 	assert.NotNil(t, x.ZipPtr)
-	assert.Equal(t, 2, len(x.ZipPtr.Files))
+	assert.Len(t, x.ZipPtr.Files, 2)
 	assert.Equal(t, "Hello! This is file A.\n", string(x.ZipPtr.Files["a.txt"].Bytes()))
 	assert.Equal(t, "Hello! This is file B.\n\n", string(x.ZipPtr.Files["b.txt"].Bytes()))
 
@@ -89,11 +92,11 @@ func TestBind_FileSuccess(t *testing.T) {
 	assert.Equal(t, "hello.txt", x.FileHeader.Filename)
 
 	f, err := x.FileHeader.Open()
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, f)
 
 	content, err := io.ReadAll(f)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "Test hello!", string(content))
 
 	// Assert FileHeader pointer type
@@ -101,11 +104,11 @@ func TestBind_FileSuccess(t *testing.T) {
 	assert.Equal(t, "hello.txt", x.FileHeader.Filename)
 
 	f, err = x.FileHeader.Open()
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, f)
 
 	content, err = io.ReadAll(f)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "Test hello!", string(content))
 
 	// Assert skipped field
@@ -120,12 +123,13 @@ func TestBind_FileSuccess(t *testing.T) {
 	// Assert additional form fields
 	assert.Equal(t, "testString", x.StringField)
 	assert.Equal(t, 123, x.IntField)
-	assert.Equal(t, 123.456, x.FloatField)
-	assert.Equal(t, true, x.BoolField)
+	assert.InEpsilon(t, 123.456, x.FloatField, 0.01)
+
+	assert.True(t, x.BoolField)
 }
 
 func TestBind_NoContentType(t *testing.T) {
-	req := NewRequest(httptest.NewRequest("POST", "/abc", strings.NewReader(`{"a": "b", "b": 5}`)))
+	req := NewRequest(httptest.NewRequest(http.MethodPost, "/abc", strings.NewReader(`{"a": "b", "b": 5}`)))
 	x := struct {
 		A string `json:"a"`
 		B int    `json:"b"`
@@ -149,6 +153,8 @@ func Test_GetContext(t *testing.T) {
 }
 
 func generateMultipartRequestZip(t *testing.T) *http.Request {
+	t.Helper()
+
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
@@ -180,23 +186,23 @@ func generateMultipartRequestZip(t *testing.T) *http.Request {
 
 	// Add non-file fields
 	err = writer.WriteField("stringField", "testString")
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	err = writer.WriteField("intField", "123")
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	err = writer.WriteField("floatField", "123.456")
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	err = writer.WriteField("boolField", "true")
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	// Close the multipart writer
 	writer.Close()
 
 	// Create a new HTTP request with the multipart data
-	req := httptest.NewRequest("POST", "/upload", &buf)
-	req.Header.Set("content-type", writer.FormDataContentType())
+	req := httptest.NewRequest(http.MethodPost, "/upload", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	return req
 }
@@ -209,13 +215,12 @@ func Test_bindMultipart_Fails(t *testing.T) {
 	}{}
 
 	err := r.bindMultipart(input)
-	assert.NotNil(t, err)
+	require.Error(t, err)
 	assert.Equal(t, errNonPointerBind, err)
 
 	// unexported field cannot be binded
 	err = r.bindMultipart(&input)
-	assert.NotNil(t, err)
-	assert.Equal(t, errNoFileFound, err)
+	require.ErrorIs(t, err, errNoFileFound)
 }
 
 func Test_bindMultipart_Fail_ParseMultiPart(t *testing.T) {
@@ -229,6 +234,86 @@ func Test_bindMultipart_Fail_ParseMultiPart(t *testing.T) {
 	_, _ = r.req.MultipartReader()
 
 	err := r.bindMultipart(&input2)
-	assert.NotNil(t, err)
-	assert.Equal(t, "http: multipart handled by MultipartReader", err.Error())
+	require.ErrorContains(t, err, "http: multipart handled by MultipartReader")
+}
+
+func Test_Params(t *testing.T) {
+	req := &http.Request{
+		URL: &url.URL{
+			RawQuery: "category=books&category=electronics&tag=tech,science",
+		},
+	}
+	r := NewRequest(req)
+
+	expectedCategories := []string{"books", "electronics"}
+	expectedTags := []string{"tech", "science"}
+
+	assert.ElementsMatch(t, expectedCategories, r.Params("category"), "expected all values of 'category' to match")
+	assert.ElementsMatch(t, expectedTags, r.Params("tag"), "expected all values of 'tag' to match")
+	assert.Empty(t, r.Params("nonexistent"), "expected empty slice for non-existent query param")
+}
+
+func TestBind_FormURLEncoded(t *testing.T) {
+	// Create a new HTTP request with form-encoded data
+	req := NewRequest(httptest.NewRequest(http.MethodPost, "/abc", strings.NewReader("Name=John&Age=30")))
+	req.req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	x := struct {
+		Name string `form:"Name"`
+		Age  int    `form:"Age"`
+	}{}
+
+	err := req.Bind(&x)
+	if err != nil {
+		t.Errorf("Bind error: %v", err)
+	}
+
+	// Check the results
+	if x.Name != "John" || x.Age != 30 {
+		t.Errorf("Bind error. Got: %v", x)
+	}
+}
+
+func TestBind_BinaryOctetStream(t *testing.T) {
+	testCases := []struct {
+		name string
+		data []byte
+	}{
+		{"Raw Binary Data", []byte{0x42, 0x65, 0x6c, 0x6c, 0x61}},
+		{"Text-Based Binary Data", []byte("This is some binary data")},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := NewRequest(httptest.NewRequest(http.MethodPost, "/binary", bytes.NewReader(tc.data)))
+			req.req.Header.Set("Content-Type", "binary/octet-stream")
+
+			var result []byte
+
+			err := req.Bind(&result)
+			if err != nil {
+				t.Errorf("Bind error: %v", err)
+			}
+
+			if !bytes.Equal(result, tc.data) {
+				t.Errorf("Bind error. Expected: %v, Got: %v", tc.data, result)
+			}
+		})
+	}
+}
+func TestBind_BinaryOctetStream_NotPointerToByteSlice(t *testing.T) {
+	req := &Request{
+		req: httptest.NewRequest(http.MethodPost, "/binary", http.NoBody),
+	}
+	req.req.Header.Set("Content-Type", "binary/octet-stream")
+
+	err := req.Bind("invalid input")
+
+	if !errors.Is(err, errNonSliceBind) {
+		t.Fatalf("Expected error: %v, got: %v", errNonSliceBind, err)
+	}
+
+	if !strings.Contains(err.Error(), "input is not a pointer to a byte slice: invalid input") {
+		t.Errorf("Expected error to contain: input is not a pointer to a byte slice: invalid input, got: %v", err)
+	}
 }

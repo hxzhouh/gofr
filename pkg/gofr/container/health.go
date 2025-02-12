@@ -5,9 +5,9 @@ import (
 	"reflect"
 )
 
-func (c *Container) Health(ctx context.Context) interface{} {
+func (c *Container) Health(ctx context.Context) any {
 	var (
-		healthMap = make(map[string]interface{})
+		healthMap = make(map[string]any)
 		downCount int
 	)
 
@@ -40,6 +40,8 @@ func (c *Container) Health(ctx context.Context) interface{} {
 		healthMap["pubsub"] = health
 	}
 
+	downCount += checkExternalDBHealth(ctx, c, healthMap)
+
 	for name, svc := range c.Services {
 		health := svc.HealthCheck(ctx)
 		if health.Status == statusDown {
@@ -54,7 +56,33 @@ func (c *Container) Health(ctx context.Context) interface{} {
 	return healthMap
 }
 
-func (c *Container) appHealth(healthMap map[string]interface{}, downCount int) {
+func checkExternalDBHealth(ctx context.Context, c *Container, healthMap map[string]any) (downCount int) {
+	services := map[string]interface {
+		HealthCheck(context.Context) (any, error)
+	}{
+		"mongo":      c.Mongo,
+		"cassandra":  c.Cassandra,
+		"clickHouse": c.Clickhouse,
+		"kv-store":   c.KVStore,
+		"dgraph":     c.DGraph,
+		"opentsdb":   c.OpenTSDB,
+	}
+
+	for name, service := range services {
+		if !isNil(service) {
+			health, err := service.HealthCheck(ctx)
+			if err != nil {
+				downCount++
+			}
+
+			healthMap[name] = health
+		}
+	}
+
+	return downCount
+}
+
+func (c *Container) appHealth(healthMap map[string]any, downCount int) {
 	healthMap["name"] = c.GetAppName()
 	healthMap["version"] = c.GetAppVersion()
 
@@ -65,7 +93,7 @@ func (c *Container) appHealth(healthMap map[string]interface{}, downCount int) {
 	}
 }
 
-func isNil(i interface{}) bool {
+func isNil(i any) bool {
 	// Get the value of the interface
 	val := reflect.ValueOf(i)
 

@@ -17,12 +17,14 @@ import (
 )
 
 const (
-	minutes       = 59
-	hrs           = 23
-	days          = 31
-	months        = 12
-	dayOfWeek     = 6
-	scheduleParts = 5
+	seconds                 = 59
+	minutes                 = 59
+	hrs                     = 23
+	days                    = 31
+	months                  = 12
+	dayOfWeek               = 6
+	scheduleParts           = 5
+	schedulePartsWithSecond = 6
 )
 
 type CronFunc func(ctx *Context)
@@ -39,6 +41,7 @@ type Crontab struct {
 }
 
 type job struct {
+	sec       map[int]struct{}
 	min       map[int]struct{}
 	hour      map[int]struct{}
 	day       map[int]struct{}
@@ -50,6 +53,7 @@ type job struct {
 }
 
 type tick struct {
+	sec       int
 	min       int
 	hour      int
 	day       int
@@ -60,7 +64,7 @@ type tick struct {
 // NewCron initializes and returns new cron tab.
 func NewCron(cntnr *container.Container) *Crontab {
 	c := &Crontab{
-		ticker:    time.NewTicker(time.Minute),
+		ticker:    time.NewTicker(time.Second),
 		container: cntnr,
 		jobs:      make([]*job, 0),
 	}
@@ -91,31 +95,43 @@ func parseSchedule(s string) (*job, error) {
 	s = strings.Trim(s, " ")
 	parts := strings.Split(s, " ")
 
-	if len(parts) != scheduleParts {
+	var partsItr int
+
+	switch len(parts) {
+	case schedulePartsWithSecond:
+		j.sec, err = parsePart(parts[partsItr], 0, seconds)
+		if err != nil {
+			return nil, err
+		}
+
+		partsItr++
+	case scheduleParts:
+		partsItr = 0
+	default:
 		return nil, errBadScheduleFormat
 	}
 
-	j.min, err = parsePart(parts[0], 0, minutes)
+	j.min, err = parsePart(parts[partsItr], 0, minutes)
 	if err != nil {
 		return nil, err
 	}
 
-	j.hour, err = parsePart(parts[1], 0, hrs)
+	j.hour, err = parsePart(parts[partsItr+1], 0, hrs)
 	if err != nil {
 		return nil, err
 	}
 
-	j.day, err = parsePart(parts[2], 1, days)
+	j.day, err = parsePart(parts[partsItr+2], 1, days)
 	if err != nil {
 		return nil, err
 	}
 
-	j.month, err = parsePart(parts[3], 1, months)
+	j.month, err = parsePart(parts[partsItr+3], 1, months)
 	if err != nil {
 		return nil, err
 	}
 
-	j.dayOfWeek, err = parsePart(parts[4], 0, dayOfWeek)
+	j.dayOfWeek, err = parsePart(parts[partsItr+4], 0, dayOfWeek)
 	if err != nil {
 		return nil, err
 	}
@@ -136,35 +152,36 @@ func mergeDays(j *job) {
 }
 
 // parsePart parse individual schedule part from schedule string.
-func parsePart(s string, min, max int) (map[int]struct{}, error) {
+func parsePart(s string, minValue, maxValue int) (map[int]struct{}, error) {
 	// wildcard pattern
 	if s == "*" {
-		return getDefaultJobField(min, max, 1), nil
+		return getDefaultJobField(minValue, maxValue, 1), nil
 	}
 
 	// */2 1-59/5 pattern
 	if matches := matchN.FindStringSubmatch(s); matches != nil {
-		return parseSteps(s, matches[1], matches[2], min, max)
+		return parseSteps(s, matches[1], matches[2], minValue, maxValue)
 	}
 
 	// 1,2,4 or 1,2,10-15,20,30-45 pattern
-	return parseRange(s, min, max)
+	return parseRange(s, minValue, maxValue)
 }
 
-func parseSteps(s, match1, match2 string, min, max int) (map[int]struct{}, error) {
-	localMin := min
-	localMax := max
+func parseSteps(s, match1, match2 string, minValue, maxValue int) (map[int]struct{}, error) {
+	localMin := minValue
+	localMax := maxValue
 
 	if match1 != "" && match1 != "*" {
-		if rng := matchRange.FindStringSubmatch(match1); rng != nil {
-			localMin, _ = strconv.Atoi(rng[1])
-			localMax, _ = strconv.Atoi(rng[2])
-
-			if localMin < min || localMax > max {
-				return nil, errOutOfRange{rng[1], s, min, max}
-			}
-		} else {
+		rng := matchRange.FindStringSubmatch(match1)
+		if rng == nil {
 			return nil, errParsing{match1, s}
+		}
+
+		localMin, _ = strconv.Atoi(rng[1])
+		localMax, _ = strconv.Atoi(rng[2])
+
+		if localMin < minValue || localMax > maxValue {
+			return nil, errOutOfRange{rng[1], s, minValue, maxValue}
 		}
 	}
 
@@ -173,28 +190,13 @@ func parseSteps(s, match1, match2 string, min, max int) (map[int]struct{}, error
 	return getDefaultJobField(localMin, localMax, n), nil
 }
 
-func parseRange(s string, min, max int) (map[int]struct{}, error) {
+func parseRange(s string, minValue, maxValue int) (map[int]struct{}, error) {
 	r := make(map[int]struct{})
 	parts := strings.Split(s, ",")
 
-	for _, x := range parts {
-		if rng := matchRange.FindStringSubmatch(x); rng != nil {
-			localMin, _ := strconv.Atoi(rng[1])
-			localMax, _ := strconv.Atoi(rng[2])
-
-			if localMin < min || localMax > max {
-				return nil, errOutOfRange{x, s, min, max}
-			}
-
-			r = getDefaultJobField(localMin, localMax, 1)
-		} else if i, err := strconv.Atoi(x); err == nil {
-			if i < min || i > max {
-				return nil, errOutOfRange{i, s, min, max}
-			}
-
-			r[i] = struct{}{}
-		} else {
-			return nil, errParsing{x, s}
+	for _, part := range parts {
+		if err := parseSingleOrRange(part, minValue, maxValue, r); err != nil {
+			return nil, err
 		}
 	}
 
@@ -205,10 +207,38 @@ func parseRange(s string, min, max int) (map[int]struct{}, error) {
 	return r, nil
 }
 
-func getDefaultJobField(min, max, incr int) map[int]struct{} {
+func parseSingleOrRange(part string, minValue, maxValue int, r map[int]struct{}) error {
+	if rng := matchRange.FindStringSubmatch(part); rng != nil {
+		localMin, _ := strconv.Atoi(rng[1])
+		localMax, _ := strconv.Atoi(rng[2])
+
+		if localMin < minValue || localMax > maxValue {
+			return errOutOfRange{part, part, minValue, maxValue}
+		}
+
+		for i := localMin; i <= localMax; i++ {
+			r[i] = struct{}{}
+		}
+	} else {
+		i, err := strconv.Atoi(part)
+		if err != nil {
+			return errParsing{part, part}
+		}
+
+		if i < minValue || i > maxValue {
+			return errOutOfRange{part, part, minValue, maxValue}
+		}
+
+		r[i] = struct{}{}
+	}
+
+	return nil
+}
+
+func getDefaultJobField(minValue, maxValue, incr int) map[int]struct{} {
 	r := make(map[int]struct{})
 
-	for i := min; i <= max; i += incr {
+	for i := minValue; i <= maxValue; i += incr {
 		r[i] = struct{}{}
 	}
 
@@ -233,6 +263,7 @@ func (c *Crontab) runScheduled(t time.Time) {
 
 func getTick(t time.Time) *tick {
 	return &tick{
+		sec:       t.Second(),
 		min:       t.Minute(),
 		hour:      t.Hour(),
 		day:       t.Day(),
@@ -274,6 +305,16 @@ func (j *job) tick(t *tick) bool {
 		return false
 	}
 
+	if j.sec != nil {
+		if _, ok := j.sec[t.sec]; !ok {
+			return false
+		}
+	} else {
+		if t.sec != 0 {
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -298,7 +339,7 @@ var errBadScheduleFormat = errors.New("schedule string must have five components
 
 // errOutOfRange denotes the errors that occur when a range in schedule is out of scope for the particular time unit.
 type errOutOfRange struct {
-	rangeVal interface{}
+	rangeVal any
 	input    string
 	min, max int
 }
@@ -326,22 +367,26 @@ func (e errParsing) Error() string {
 type noopRequest struct {
 }
 
-func (b noopRequest) Context() context.Context {
+func (noopRequest) Context() context.Context {
 	return context.Background()
 }
 
-func (b noopRequest) Param(string) string {
+func (noopRequest) Param(string) string {
 	return ""
 }
 
-func (b noopRequest) PathParam(string) string {
+func (noopRequest) PathParam(string) string {
 	return ""
 }
 
-func (b noopRequest) HostName() string {
+func (noopRequest) HostName() string {
 	return "gofr"
 }
 
-func (b noopRequest) Bind(interface{}) error {
+func (noopRequest) Bind(any) error {
+	return nil
+}
+
+func (noopRequest) Params(string) []string {
 	return nil
 }

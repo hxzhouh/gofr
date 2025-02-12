@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	cmd2 "gofr.dev/pkg/gofr/cmd"
+	"gofr.dev/pkg/gofr/cmd/terminal"
 	"gofr.dev/pkg/gofr/container"
 )
 
 type cmd struct {
 	routes []route
+	out    terminal.Output
 }
 
 type route struct {
@@ -21,11 +23,13 @@ type route struct {
 	help        string
 }
 
+// Options is a function type used to configure a route in the command handler.
 type Options func(c *route)
 
+// ErrCommandNotFound is an empty struct used to represent a specific error when a command is not found.
 type ErrCommandNotFound struct{}
 
-func (e ErrCommandNotFound) Error() string {
+func (ErrCommandNotFound) Error() string {
 	return "No Command Found!"
 }
 
@@ -56,7 +60,7 @@ func (cmd *cmd) Run(c *container.Container) {
 	}
 
 	r := cmd.handler(subCommand)
-	ctx := newContext(&cmd2.Responder{}, cmd2.NewRequest(args), c)
+	ctx := newCMDContext(&cmd2.Responder{}, cmd2.NewRequest(args), c, cmd.out)
 
 	// handling if route is not found or the handler is nil
 	if cmd.noCommandResponse(r, ctx) {
@@ -64,7 +68,7 @@ func (cmd *cmd) Run(c *container.Container) {
 	}
 
 	if showHelp {
-		fmt.Println(r.help)
+		cmd.out.Println(r.help)
 		return
 	}
 
@@ -121,6 +125,7 @@ func AddHelp(helperString string) Options {
 	}
 }
 
+// addRoute adds a new route to cmd's list of routes.
 func (cmd *cmd) addRoute(pattern string, handler Handler, options ...Options) {
 	tempRoute := route{
 		pattern: pattern,

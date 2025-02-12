@@ -2,36 +2,41 @@ package main
 
 import (
 	"bytes"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"gofr.dev/pkg/gofr/testutil"
 )
 
 func TestMain_BindError(t *testing.T) {
-	const host = "http://localhost:8300"
+	configs := testutil.NewServerConfigs(t)
+
 	go main()
-	time.Sleep(time.Second * 1)
+	time.Sleep(100 * time.Millisecond)
 
 	c := http.Client{}
 
-	req, _ := http.NewRequest(http.MethodPost, host+"/upload", http.NoBody)
+	req, _ := http.NewRequest(http.MethodPost, configs.HTTPHost+"/upload", http.NoBody)
 	req.Header.Set("content-type", "multipart/form-data")
 	resp, err := c.Do(req)
 
-	assert.Equal(t, 500, resp.StatusCode)
-	assert.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	require.NoError(t, err)
 
 	buf, contentType := generateMultiPartBody(t)
-	req, _ = http.NewRequest(http.MethodPost, host+"/upload", buf)
+	req, _ = http.NewRequest(http.MethodPost, configs.HTTPHost+"/upload", buf)
 	req.Header.Set("content-type", contentType)
 	req.ContentLength = int64(buf.Len())
 
 	resp, err = c.Do(req)
-	assert.Equal(t, 201, resp.StatusCode)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
 }
 
 func generateMultiPartBody(t *testing.T) (*bytes.Buffer, string) {
@@ -54,7 +59,7 @@ func generateMultiPartBody(t *testing.T) (*bytes.Buffer, string) {
 		t.Fatalf("Failed to write file to form: %v", err)
 	}
 
-	fileHeader, err := writer.CreateFormFile("a", "hello.txt")
+	fileHeader, err := writer.CreateFormFile("file_upload", "hello.txt")
 	if err != nil {
 		t.Fatalf("Failed to create form file: %v", err)
 	}

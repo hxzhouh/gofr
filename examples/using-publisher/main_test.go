@@ -2,17 +2,22 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"gofr.dev/pkg/gofr/testutil"
 )
 
 func TestExamplePublisher(t *testing.T) {
-	const host = "http://localhost:8100"
+	configs := testutil.NewServerConfigs(t)
+
 	go main()
-	time.Sleep(time.Second * 1)
+	time.Sleep(200 * time.Millisecond)
 
 	testCases := []struct {
 		desc               string
@@ -50,25 +55,25 @@ func TestExamplePublisher(t *testing.T) {
 	c := http.Client{}
 
 	for i, tc := range testCases {
-		req, _ := http.NewRequest(http.MethodPost, host+tc.path, bytes.NewBuffer(tc.body))
+		req, _ := http.NewRequest(http.MethodPost, configs.HTTPHost+tc.path, bytes.NewBuffer(tc.body))
 		req.Header.Set("content-type", "application/json")
 		resp, err := c.Do(req)
-
-		assert.Equal(t, tc.expectedStatusCode, resp.StatusCode, "TEST[%d], Failed.\n%s", i, tc.desc)
-		assert.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
-
 		defer resp.Body.Close()
 
+		assert.Equal(t, tc.expectedStatusCode, resp.StatusCode, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 	}
 }
 
 func TestExamplePublisherError(t *testing.T) {
 	t.Setenv("PUBSUB_BROKER", "localhost:1012")
-	t.Setenv("HTTP_PORT", "8200")
 
-	const host = "http://localhost:8200"
+	configs := testutil.NewServerConfigs(t)
+
+	host := fmt.Sprint("http://localhost:", configs.HTTPPort)
+
 	go main()
-	time.Sleep(time.Second * 1)
+	time.Sleep(200 * time.Millisecond)
 
 	testCases := []struct {
 		desc               string
@@ -99,7 +104,7 @@ func TestExamplePublisherError(t *testing.T) {
 		resp, err := c.Do(req)
 
 		assert.Equal(t, tc.expectedStatusCode, resp.StatusCode, "TEST[%d], Failed.\n%s", i, tc.desc)
-		assert.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 
 		defer resp.Body.Close()
 	}

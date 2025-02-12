@@ -25,42 +25,45 @@ The CORS middleware provides the following overridable configs:
 
 By adding custom middleware to your GoFr application, user can easily extend its functionality and implement 
 cross-cutting concerns in a modular and reusable way.
-User can use the `UseMiddleware` method on your GoFr application instance to register your custom middleware.
+User can use the `UseMiddleware` or `UseMiddlewareWithContainer` method on your GoFr application instance to register your custom middleware.
 
-### Example:
+### Using UseMiddleware method for Custom Middleware
+The UseMiddleware method is ideal for simple middleware that doesn't need direct access to the application's container.
+
+#### Example:
 
 ```go
 import (
-    "net/http"
+	"net/http"
 
-    gofrHTTP "gofr.dev/pkg/gofr/http"
+	gofrHTTP "gofr.dev/pkg/gofr/http"
 )
 
 // Define your custom middleware function
 func customMiddleware() gofrHTTP.Middleware {
-    return func(inner http.Handler) http.Handler {
-        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            // Your custom logic here
-            // For example, logging, authentication, etc.
-            
-            // Call the next handler in the chain
-            inner.ServeHTTP(w, r)
-        })
-    }
+	return func(inner http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Your custom logic here
+			// For example, logging, authentication, etc.
+
+			// Call the next handler in the chain
+			inner.ServeHTTP(w, r)
+		})
+	}
 }
 
 func main() {
-    // Create a new instance of your GoFr application
-    app := gofr.New()
+	// Create a new instance of your GoFr application
+	app := gofr.New()
 
-    // Add your custom middleware to the application
-    app.UseMiddleware(customMiddleware())
+	// Add your custom middleware to the application
+	app.UseMiddleware(customMiddleware())
 
-    // Define your application routes and handlers
-    // ...
+	// Define your application routes and handlers
+	// ...
 
-    // Run your GoFr application
-    app.Run()
+	// Run your GoFr application
+	app.Run()
 }
 ```
 

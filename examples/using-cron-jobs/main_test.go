@@ -5,11 +5,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"gofr.dev/pkg/gofr/testutil"
 )
 
 func Test_UserPurgeCron(t *testing.T) {
+	configs := testutil.NewServerConfigs(t)
+
 	go main()
-	time.Sleep(1*time.Minute + 30*time.Second)
+	time.Sleep(1100 * time.Millisecond)
 
 	expected := 1
 
@@ -20,4 +23,5 @@ func Test_UserPurgeCron(t *testing.T) {
 	mu.Unlock()
 
 	assert.Equal(t, expected, m)
+	t.Logf("Metrics server running at: %s", configs.MetricsHost)
 }

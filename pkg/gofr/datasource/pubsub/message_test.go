@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMessage_Context(t *testing.T) {
@@ -19,9 +20,9 @@ func TestMessage_Context(t *testing.T) {
 func TestMessage_Bind(t *testing.T) {
 	testCases := []struct {
 		desc     string
-		input    interface{}
+		input    any
 		value    []byte
-		expected interface{}
+		expected any
 		hasError bool
 	}{
 		{
@@ -53,10 +54,10 @@ func TestMessage_Bind(t *testing.T) {
 			hasError: false,
 		},
 		{
-			desc:     "bind to map[string]interface{}",
-			input:    &map[string]interface{}{},
+			desc:     "bind to map[string]any",
+			input:    &map[string]any{},
 			value:    []byte(`{"key":"value"}`),
-			expected: &map[string]interface{}{"key": "value"},
+			expected: &map[string]any{"key": "value"},
 			hasError: false,
 		},
 		{
@@ -90,15 +91,15 @@ func TestMessage_Bind(t *testing.T) {
 			err := m.Bind(tc.input)
 
 			if tc.hasError {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 
 				switch v := tc.input.(type) {
 				case *string:
 					assert.Equal(t, tc.expected, *v)
 				case *float64:
-					assert.Equal(t, tc.expected, *v)
+					assert.InEpsilon(t, tc.expected, *v, 0.01)
 				case *int:
 					assert.Equal(t, tc.expected, *v)
 				case *bool:
@@ -116,7 +117,7 @@ func TestBindString(t *testing.T) {
 
 	var s string
 	err := m.bindString(&s)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "test", s)
 }
 
@@ -125,14 +126,14 @@ func TestBindFloat64(t *testing.T) {
 
 	var f float64
 	err := m.bindFloat64(&f)
-	assert.NoError(t, err)
-	assert.Equal(t, 1.23, f)
+	require.NoError(t, err)
+	assert.InEpsilon(t, 1.23, f, 0.01)
 
 	m = &Message{Value: []byte("not a float")}
 
 	var f2 float64
 	err = m.bindFloat64(&f2)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 func TestBindInt(t *testing.T) {
@@ -140,14 +141,14 @@ func TestBindInt(t *testing.T) {
 
 	var i int
 	err := m.bindInt(&i)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 123, i)
 
 	m = &Message{Value: []byte("not an int")}
 
 	var i2 int
 	err = m.bindInt(&i2)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 func TestBindBool(t *testing.T) {
@@ -155,29 +156,29 @@ func TestBindBool(t *testing.T) {
 
 	var b bool
 	err := m.bindBool(&b)
-	assert.NoError(t, err)
-	assert.Equal(t, true, b)
+	require.NoError(t, err)
+	assert.True(t, b)
 
 	m = &Message{Value: []byte("not a bool")}
 
 	var b2 bool
 	err = m.bindBool(&b2)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 func TestBindStruct(t *testing.T) {
 	m := &Message{Value: []byte(`{"key":"value"}`)}
 
-	var i map[string]interface{}
+	var i map[string]any
 	err := m.bindStruct(&i)
-	assert.NoError(t, err)
-	assert.Equal(t, map[string]interface{}{"key": "value"}, i)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"key": "value"}, i)
 
 	m = &Message{Value: []byte(`{"key":}`)}
 
-	var i2 map[string]interface{}
+	var i2 map[string]any
 	err = m.bindStruct(&i2)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 func TestMessage_Param(t *testing.T) {
@@ -225,5 +226,11 @@ func TestMessage_HostName(t *testing.T) {
 
 	out := m.HostName()
 
-	assert.Equal(t, "", out)
+	assert.Empty(t, out)
+}
+
+func TestMessage_QueryParam(t *testing.T) {
+	m := &Message{}
+
+	assert.Nil(t, m.Params("test"))
 }

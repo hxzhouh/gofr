@@ -2,20 +2,23 @@ package main
 
 import (
 	"encoding/json"
+
+	"gofr.dev/examples/using-publisher/migrations"
 	"gofr.dev/pkg/gofr"
 )
 
 func main() {
 	app := gofr.New()
 
-	app.POST("/publish-order", order)
+	app.Migrate(migrations.All())
 
+	app.POST("/publish-order", order)
 	app.POST("/publish-product", product)
 
 	app.Run()
 }
 
-func order(ctx *gofr.Context) (interface{}, error) {
+func order(ctx *gofr.Context) (any, error) {
 	type orderStatus struct {
 		OrderId string `json:"orderId"`
 		Status  string `json:"status"`
@@ -38,7 +41,7 @@ func order(ctx *gofr.Context) (interface{}, error) {
 	return "Published", nil
 }
 
-func product(ctx *gofr.Context) (interface{}, error) {
+func product(ctx *gofr.Context) (any, error) {
 	type productInfo struct {
 		ProductId string `json:"productId"`
 		Price     string `json:"price"`

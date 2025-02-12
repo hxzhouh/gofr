@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/go-redis/redismock/v9"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"gofr.dev/pkg/gofr"
 	"gofr.dev/pkg/gofr/config"
@@ -19,16 +21,19 @@ import (
 	"gofr.dev/pkg/gofr/testutil"
 )
 
-const host = "http://localhost:9000"
-
 func TestIntegration_SimpleAPIServer(t *testing.T) {
+	host := "http://localhost:9000"
+
+	port := testutil.GetFreePort(t)
+	t.Setenv("METRICS_PORT", strconv.Itoa(port))
+
 	go main()
-	time.Sleep(time.Second * 3) // Giving some time to start the server
+	time.Sleep(100 * time.Millisecond) // Giving some time to start the server
 
 	tests := []struct {
 		desc string
 		path string
-		body interface{}
+		body any
 	}{
 		{"hello handler", "/hello", "Hello World!"},
 		{"hello handler with query parameter", "/hello?name=gofr", "Hello gofr!"},
@@ -38,25 +43,25 @@ func TestIntegration_SimpleAPIServer(t *testing.T) {
 	}
 
 	for i, tc := range tests {
-		req, _ := http.NewRequest("GET", host+tc.path, nil)
+		req, _ := http.NewRequest(http.MethodGet, host+tc.path, nil)
 		req.Header.Set("content-type", "application/json")
 
 		c := http.Client{}
 		resp, err := c.Do(req)
 
 		var data = struct {
-			Data interface{} `json:"data"`
+			Data any `json:"data"`
 		}{}
 
 		b, err := io.ReadAll(resp.Body)
 
-		assert.Nil(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 
 		_ = json.Unmarshal(b, &data)
 
 		assert.Equal(t, tc.body, data.Data, "TEST[%d], Failed.\n%s", i, tc.desc)
 
-		assert.Nil(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode, "TEST[%d], Failed.\n%s", i, tc.desc)
 
@@ -65,52 +70,54 @@ func TestIntegration_SimpleAPIServer(t *testing.T) {
 }
 
 func TestIntegration_SimpleAPIServer_Errors(t *testing.T) {
+	host := "http://localhost:9000"
+
 	tests := []struct {
 		desc       string
 		path       string
-		body       interface{}
+		body       any
 		statusCode int
 	}{
 		{
 			desc:       "error handler called",
 			path:       "/error",
 			statusCode: http.StatusInternalServerError,
-			body:       map[string]interface{}{"message": "some error occurred"},
+			body:       map[string]any{"message": "some error occurred"},
 		},
 		{
 			desc:       "empty route",
 			path:       "/",
 			statusCode: http.StatusNotFound,
-			body:       map[string]interface{}{"message": "route not registered"},
+			body:       map[string]any{"message": "route not registered"},
 		},
 		{
 			desc:       "route not registered with the server",
 			path:       "/route",
 			statusCode: http.StatusNotFound,
-			body:       map[string]interface{}{"message": "route not registered"},
+			body:       map[string]any{"message": "route not registered"},
 		},
 	}
 
 	for i, tc := range tests {
-		req, _ := http.NewRequest("GET", host+tc.path, nil)
+		req, _ := http.NewRequest(http.MethodGet, host+tc.path, nil)
 		req.Header.Set("content-type", "application/json")
 
 		c := http.Client{}
 		resp, err := c.Do(req)
 
 		var data = struct {
-			Error interface{} `json:"error"`
+			Error any `json:"error"`
 		}{}
 
 		b, err := io.ReadAll(resp.Body)
 
-		assert.Nil(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 
 		_ = json.Unmarshal(b, &data)
 
 		assert.Equal(t, tc.body, data.Error, "TEST[%d], Failed.\n%s", i, tc.desc)
 
-		assert.Nil(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 
 		assert.Equal(t, tc.statusCode, resp.StatusCode, "TEST[%d], Failed.\n%s", i, tc.desc)
 
@@ -119,6 +126,8 @@ func TestIntegration_SimpleAPIServer_Errors(t *testing.T) {
 }
 
 func TestIntegration_SimpleAPIServer_Health(t *testing.T) {
+	host := "http://localhost:9000"
+
 	tests := []struct {
 		desc       string
 		path       string
@@ -129,19 +138,25 @@ func TestIntegration_SimpleAPIServer_Health(t *testing.T) {
 	}
 
 	for i, tc := range tests {
-		req, _ := http.NewRequest("GET", host+tc.path, nil)
+		req, _ := http.NewRequest(http.MethodGet, host+tc.path, nil)
 		req.Header.Set("content-type", "application/json")
 
 		c := http.Client{}
 		resp, err := c.Do(req)
 
-		assert.Nil(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
+		require.NoError(t, err, "TEST[%d], Failed.\n%s", i, tc.desc)
 
 		assert.Equal(t, tc.statusCode, resp.StatusCode, "TEST[%d], Failed.\n%s", i, tc.desc)
 	}
 }
 
 func TestRedisHandler(t *testing.T) {
+	metricsPort := testutil.GetFreePort(t)
+	httpPort := testutil.GetFreePort(t)
+
+	t.Setenv("METRICS_PORT", strconv.Itoa(metricsPort))
+	t.Setenv("HTTP_PORT", strconv.Itoa(httpPort))
+
 	a := gofr.New()
 	logger := logging.NewLogger(logging.DEBUG)
 	redisClient, mock := redismock.NewClientMock()
@@ -157,5 +172,5 @@ func TestRedisHandler(t *testing.T) {
 	resp, err := RedisHandler(ctx)
 
 	assert.Nil(t, resp)
-	assert.NotNil(t, err)
+	require.Error(t, err)
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"gofr.dev/examples/using-migrations/migrations"
-
 	"gofr.dev/pkg/gofr"
 )
 
@@ -38,7 +37,7 @@ type Employee struct {
 }
 
 // GetHandler handles GET requests for retrieving employee information
-func GetHandler(c *gofr.Context) (interface{}, error) {
+func GetHandler(c *gofr.Context) (any, error) {
 	name := c.Param("name")
 	if name == "" {
 		return nil, errors.New("name can't be empty")
@@ -56,7 +55,7 @@ func GetHandler(c *gofr.Context) (interface{}, error) {
 }
 
 // PostHandler handles POST requests for creating new employees
-func PostHandler(c *gofr.Context) (interface{}, error) {
+func PostHandler(c *gofr.Context) (any, error) {
 	var emp Employee
 	if err := c.Bind(&emp); err != nil {
 		c.Logger.Errorf("error in binding: %v", err)
@@ -66,7 +65,7 @@ func PostHandler(c *gofr.Context) (interface{}, error) {
 	// Execute the INSERT query
 	_, err := c.SQL.ExecContext(c, queryInsertEmployee, emp.ID, emp.Name, emp.Gender, emp.Phone, emp.DOB)
 	if err != nil {
-		return Employee{}, errors.New(fmt.Sprintf("DB Error: %v", err))
+		return nil, errors.New(fmt.Sprintf("DB Error: %v", err))
 	}
 
 	return fmt.Sprintf("successfully posted entity: %v", emp.Name), nil

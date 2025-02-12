@@ -23,6 +23,8 @@ type Client interface {
 
 	CreateTopic(context context.Context, name string) error
 	DeleteTopic(context context.Context, name string) error
+
+	Close() error
 }
 
 type Committer interface {
@@ -30,10 +32,10 @@ type Committer interface {
 }
 
 type Logger interface {
-	Debugf(format string, args ...interface{})
-	Debug(args ...interface{})
-	Logf(format string, args ...interface{})
-	Log(args ...interface{})
-	Errorf(format string, args ...interface{})
-	Error(args ...interface{})
+	Debugf(format string, args ...any)
+	Debug(args ...any)
+	Logf(format string, args ...any)
+	Log(args ...any)
+	Errorf(format string, args ...any)
+	Error(args ...any)
 }

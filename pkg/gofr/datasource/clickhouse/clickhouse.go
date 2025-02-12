@@ -2,10 +2,14 @@ package clickhouse
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Config struct {
@@ -15,12 +19,15 @@ type Config struct {
 	Database string
 }
 
-type client struct {
+type Client struct {
 	conn    Conn
 	config  Config
 	logger  Logger
 	metrics Metrics
+	tracer  trace.Tracer
 }
+
+var errStatusDown = errors.New("status down")
 
 // New initializes Clickhouse client with the provided configuration.
 // Metrics, Logger has to be initialized before calling the Connect method.
@@ -30,34 +37,39 @@ type client struct {
 //	client.UseMetrics(Metrics())
 //
 //	client.Connect()
-//
-//nolint:revive // client is unexported as we want the user to implement the Conn interface.
-func New(config Config) *client {
-	return &client{config: config}
+func New(config Config) *Client {
+	return &Client{config: config}
 }
 
 // UseLogger sets the logger for the Clickhouse client.
-func (c *client) UseLogger(logger interface{}) {
+func (c *Client) UseLogger(logger any) {
 	if l, ok := logger.(Logger); ok {
 		c.logger = l
 	}
 }
 
 // UseMetrics sets the metrics for the Clickhouse client.
-func (c *client) UseMetrics(metrics interface{}) {
+func (c *Client) UseMetrics(metrics any) {
 	if m, ok := metrics.(Metrics); ok {
 		c.metrics = m
 	}
 }
 
+// UseTracer sets the tracer for Clickhouse client.
+func (c *Client) UseTracer(tracer any) {
+	if t, ok := tracer.(trace.Tracer); ok {
+		c.tracer = t
+	}
+}
+
 // Connect establishes a connection to Clickhouse and registers metrics using the provided configuration when the client was Created.
-func (c *client) Connect() {
+func (c *Client) Connect() {
 	var err error
 
-	c.logger.Logf("connecting to clickhouse db at %v to database %v", c.config.Hosts, c.config.Database)
+	c.logger.Debugf("connecting to Clickhouse db at %v to database %v", c.config.Hosts, c.config.Database)
 
 	clickHouseBuckets := []float64{.05, .075, .1, .125, .15, .2, .3, .5, .75, 1, 2, 3, 4, 5, 7.5, 10}
-	c.metrics.NewHistogram("app_clickhouse_stats", "Response time of Clickhouse queries in milliseconds.", clickHouseBuckets...)
+	c.metrics.NewHistogram("app_clickhouse_stats", "Response time of Clickhouse queries in microseconds.", clickHouseBuckets...)
 
 	c.metrics.NewGauge("app_clickhouse_open_connections", "Number of open Clickhouse connections.")
 	c.metrics.NewGauge("app_clickhouse_idle_connections", "Number of idle Clickhouse connections.")
@@ -75,7 +87,7 @@ func (c *client) Connect() {
 	})
 
 	if err != nil {
-		c.logger.Errorf("error while connecting to clickhouse %v", err)
+		c.logger.Errorf("error while connecting to Clickhouse %v", err)
 
 		return
 	}
@@ -83,7 +95,7 @@ func (c *client) Connect() {
 	if err = c.conn.Ping(ctx); err != nil {
 		c.logger.Errorf("ping failed with error %v", err)
 	} else {
-		c.logger.Logf("successfully connected to clickhouseDB")
+		c.logger.Logf("successfully connected to ClickhouseDB")
 	}
 
 	go pushDBMetrics(c.conn, c.metrics)
@@ -106,10 +118,14 @@ func pushDBMetrics(conn Conn, metrics Metrics) {
 
 // Exec should be used for DDL and simple statements.
 // It should not be used for larger inserts or query iterations.
-func (c *client) Exec(ctx context.Context, query string, args ...any) error {
-	defer c.logQueryAndSendMetrics(time.Now(), "Exec", query, args...)
+func (c *Client) Exec(ctx context.Context, query string, args ...any) error {
+	tracedCtx, span := c.addTrace(ctx, "exec", query)
 
-	return c.conn.Exec(ctx, query, args...)
+	err := c.conn.Exec(tracedCtx, query, args...)
+
+	defer c.sendOperationStats(time.Now(), "Exec", query, "exec", span, args...)
+
+	return err
 }
 
 // Select method allows a set of response rows to be marshaled into a slice of structs with a single invocation..
@@ -125,22 +141,31 @@ func (c *client) Exec(ctx context.Context, query string, args ...any) error {
 // var user []User
 //
 // err = ctx.Clickhouse.Select(ctx, &user, "SELECT * FROM users") .
-func (c *client) Select(ctx context.Context, dest any, query string, args ...any) error {
-	defer c.logQueryAndSendMetrics(time.Now(), "Select", query, args...)
+func (c *Client) Select(ctx context.Context, dest any, query string, args ...any) error {
+	tracedCtx, span := c.addTrace(ctx, "select", query)
 
-	return c.conn.Select(ctx, dest, query, args...)
+	err := c.conn.Select(tracedCtx, dest, query, args...)
+
+	defer c.sendOperationStats(time.Now(), "Select", query, "select", span, args...)
+
+	return err
 }
 
 // AsyncInsert allows the user to specify whether the client should wait for the server to complete the insert or
 // respond once the data has been received.
-func (c *client) AsyncInsert(ctx context.Context, query string, wait bool, args ...any) error {
-	defer c.logQueryAndSendMetrics(time.Now(), "AsyncInsert", query, args...)
+func (c *Client) AsyncInsert(ctx context.Context, query string, wait bool, args ...any) error {
+	tracedCtx, span := c.addTrace(ctx, "async-insert", query)
 
-	return c.conn.AsyncInsert(ctx, query, wait, args...)
+	err := c.conn.AsyncInsert(tracedCtx, query, wait, args...)
+
+	defer c.sendOperationStats(time.Now(), "AsyncInsert", query, "async-insert", span, args...)
+
+	return err
 }
 
-func (c *client) logQueryAndSendMetrics(start time.Time, methodType, query string, args ...interface{}) {
-	duration := time.Since(start).Milliseconds()
+func (c *Client) sendOperationStats(start time.Time, methodType, query string, method string,
+	span trace.Span, args ...any) {
+	duration := time.Since(start).Microseconds()
 
 	c.logger.Debug(&Log{
 		Type:     methodType,
@@ -148,6 +173,11 @@ func (c *client) logQueryAndSendMetrics(start time.Time, methodType, query strin
 		Duration: duration,
 		Args:     args,
 	})
+
+	if span != nil {
+		defer span.End()
+		span.SetAttributes(attribute.Int64(fmt.Sprintf("clickhouse.%v.duration", method), duration))
+	}
 
 	c.metrics.RecordHistogram(context.Background(), "app_clickhouse_stats", float64(duration), "hosts", c.config.Hosts,
 		"database", c.config.Database, "type", getOperationType(query))
@@ -161,34 +191,41 @@ func getOperationType(query string) string {
 }
 
 type Health struct {
-	Status  string                 `json:"status,omitempty"`
-	Details map[string]interface{} `json:"details,omitempty"`
-}
-
-func (h *Health) GetStatus() string {
-	return h.Status
+	Status  string         `json:"status,omitempty"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // HealthCheck checks the health of the MongoDB client by pinging the database.
-func (c *client) HealthCheck() interface{} {
+func (c *Client) HealthCheck(ctx context.Context) (any, error) {
 	h := Health{
-		Details: make(map[string]interface{}),
+		Details: make(map[string]any),
 	}
 
 	h.Details["host"] = c.config.Hosts
 	h.Details["database"] = c.config.Database
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
 	err := c.conn.Ping(ctx)
 	if err != nil {
 		h.Status = "DOWN"
 
-		return &h
+		return &h, errStatusDown
 	}
 
 	h.Status = "UP"
 
-	return &h
+	return &h, nil
+}
+
+func (c *Client) addTrace(ctx context.Context, method, query string) (context.Context, trace.Span) {
+	if c.tracer != nil {
+		contextWithTrace, span := c.tracer.Start(ctx, fmt.Sprintf("clickhouse-%v", method))
+
+		span.SetAttributes(
+			attribute.String("clickhouse.query", query),
+		)
+
+		return contextWithTrace, span
+	}
+
+	return ctx, nil
 }

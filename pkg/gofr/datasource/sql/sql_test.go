@@ -1,8 +1,8 @@
 package sql
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -36,9 +36,7 @@ func TestNewSQL_ErrorCase(t *testing.T) {
 		NewSQL(mockConfig, mockLogger, mockMetrics)
 	})
 
-	if !strings.Contains(testLogs, expectedLog) {
-		t.Errorf("TestNewSQL_ErrorCase Failed! Expcted error log doesn't match actual.")
-	}
+	assert.Containsf(t, testLogs, expectedLog, "TestNewSQL_ErrorCase Failed! Expected error log doesn't match actual.")
 }
 
 func TestNewSQL_InvalidDialect(t *testing.T) {
@@ -56,9 +54,7 @@ func TestNewSQL_InvalidDialect(t *testing.T) {
 		NewSQL(mockConfig, mockLogger, mockMetrics)
 	})
 
-	if !strings.Contains(testLogs, errUnsupportedDialect.Error()) {
-		t.Errorf("TestNewSQL_ErrorCase Failed! Expcted error log doesn't match actual.")
-	}
+	assert.Containsf(t, testLogs, errUnsupportedDialect.Error(), "TestNewSQL_ErrorCase Failed! Expected error log doesn't match actual.")
 }
 
 func TestNewSQL_GetDBDialect(t *testing.T) {
@@ -81,7 +77,7 @@ func TestNewSQL_GetDBDialect(t *testing.T) {
 
 	assert.Equal(t, "postgres", dialect)
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestNewSQL_InvalidConfig(t *testing.T) {
@@ -107,8 +103,10 @@ func TestSQL_GetDBConfig(t *testing.T) {
 		"DB_PASSWORD":            "password",
 		"DB_PORT":                "3201",
 		"DB_NAME":                "test",
+		"DB_SSL_MODE":            "require",
 		"DB_MAX_IDLE_CONNECTION": "25",
 		"DB_MAX_OPEN_CONNECTION": "50",
+		"DB_CHARSET":             "utf8mb4",
 	})
 
 	expectedComfigs := &DBConfig{
@@ -118,8 +116,10 @@ func TestSQL_GetDBConfig(t *testing.T) {
 		Password:    "password",
 		Port:        "3201",
 		Database:    "test",
+		SSLMode:     "require",
 		MaxIdleConn: 25,
 		MaxOpenConn: 50,
+		Charset:     "utf8mb4",
 	}
 
 	configs := getDBConfig(mockConfig)
@@ -161,6 +161,7 @@ func TestSQL_ConfigCases(t *testing.T) {
 			Port:        "3306",
 			MaxIdleConn: tc.expectedIdle,
 			MaxOpenConn: tc.expectedOpen,
+			SSLMode:     "disable",
 		}
 
 		configs := getDBConfig(mockConfig)
@@ -189,6 +190,19 @@ func TestSQL_getDBConnectionString(t *testing.T) {
 			expOut: "user:password@tcp(host:3201)/test?charset=utf8&parseTime=True&loc=Local&interpolateParams=true",
 		},
 		{
+			desc: "mysql dialect with Configurable charset",
+			configs: &DBConfig{
+				Dialect:  "mysql",
+				HostName: "host",
+				User:     "user",
+				Password: "password",
+				Port:     "3201",
+				Database: "test",
+				Charset:  "utf8mb4",
+			},
+			expOut: "user:password@tcp(host:3201)/test?charset=utf8mb4&parseTime=True&loc=Local&interpolateParams=true",
+		},
+		{
 			desc: "postgresql dialect",
 			configs: &DBConfig{
 				Dialect:  "postgres",
@@ -197,6 +211,20 @@ func TestSQL_getDBConnectionString(t *testing.T) {
 				Password: "password",
 				Port:     "3201",
 				Database: "test",
+				SSLMode:  "require",
+			},
+			expOut: "host=host port=3201 user=user password=password dbname=test sslmode=require",
+		},
+		{
+			desc: "postgresql dialect",
+			configs: &DBConfig{
+				Dialect:  "postgres",
+				HostName: "host",
+				User:     "user",
+				Password: "password",
+				Port:     "3201",
+				Database: "test",
+				SSLMode:  "disable",
 			},
 			expOut: "host=host port=3201 user=user password=password dbname=test sslmode=disable",
 		},
@@ -244,6 +272,60 @@ func Test_NewSQLMockWithConfig(t *testing.T) {
 	assert.NotNil(t, mockMetric)
 }
 
+var errSqliteConnection = errors.New("connection failed")
+
+func Test_sqliteSuccessfulConnLogs(t *testing.T) {
+	tests := []struct {
+		desc        string
+		status      string
+		expectedLog string
+	}{
+		{"sqlite connection in process", "connecting", `connecting to 'test' database`},
+		{"sqlite connected successfully", "connected", `connected to 'test' database`},
+	}
+
+	for _, test := range tests {
+		logs := testutil.StdoutOutputForFunc(func() {
+			mockLogger := logging.NewMockLogger(logging.DEBUG)
+			mockConfig := &DBConfig{
+				Dialect:  sqlite,
+				Database: "test",
+			}
+
+			printConnectionSuccessLog(test.status, mockConfig, mockLogger)
+		})
+
+		assert.Contains(t, logs, test.expectedLog)
+	}
+}
+
+func Test_sqliteErrConnLogs(t *testing.T) {
+	test := []struct {
+		desc        string
+		action      string
+		err         error
+		expectedLog string
+	}{
+		{"sqlite connection failure", "connect", errSqliteConnection,
+			`could not connect database 'test', error: connection failed`},
+		{"sqlite open connection failure", "open connection with", errSqliteConnection,
+			`could not open connection with database 'test', error: connection failed`},
+	}
+	for _, tt := range test {
+		logs := testutil.StderrOutputForFunc(func() {
+			mockLogger := logging.NewMockLogger(logging.DEBUG)
+			mockConfig := &DBConfig{
+				Dialect:  sqlite,
+				Database: "test",
+			}
+
+			printConnectionFailureLog(tt.action, mockConfig, mockLogger, tt.err)
+		})
+
+		assert.Contains(t, logs, tt.expectedLog)
+	}
+}
+
 func Test_SQLRetryConnectionInfoLog(t *testing.T) {
 	logs := testutil.StdoutOutputForFunc(func() {
 		ctrl := gomock.NewController(t)
@@ -265,7 +347,7 @@ func Test_SQLRetryConnectionInfoLog(t *testing.T) {
 
 		_ = NewSQL(mockConfig, mockLogger, mockMetrics)
 
-		time.Sleep(2 * time.Second)
+		time.Sleep(100 * time.Millisecond)
 	})
 
 	assert.Contains(t, logs, "retrying SQL database connection")

@@ -6,7 +6,6 @@
 //	mockgen -source=metrics.go -destination=mock_metrics.go -package=clickhouse
 //
 
-// Package clickhouse is a generated GoMock package.
 package clickhouse
 
 import (

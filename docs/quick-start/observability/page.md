@@ -7,7 +7,7 @@ GoFr by default manages observability in different ways once the server starts:
 Logs offer real-time information, providing valuable insights and immediate visibility into the ongoing state and activities of the system.
 It helps in identifying errors, debugging and troubleshooting, monitor performance, analyzing application usage, communications etc.
 
-GoFr logger allows to customize log level which provides flexibility to adjust logs based on specific needs.
+GoFr logger allows customizing log level which provides flexibility to adjust logs based on specific needs.
 
 Logs are generated only for events equal to or above the specified log level, by default GoFr logs at _INFO_ level.
 Log Level can be changed by setting the environment variable `LOG_LEVEL` value to _WARN,DEBUG,ERROR,NOTICE or FATAL_.
@@ -17,7 +17,7 @@ They contain information such as request's correlation ID, status codes, request
 
 {% figure src="/quick-start-logs.png" alt="Pretty Printed Logs" /%}
 
-Logs are well-structured, they are of type JSON when exported to a file, such that they can be pushed to logging systems such as {% new-tab-link title="Loki" href="https://grafana.com/oss/loki/" /%}, elastic search etc.
+Logs are well-structured, they are of type JSON when exported to a file, such that they can be pushed to logging systems such as {% new-tab-link title="Loki" href="https://grafana.com/oss/loki/" /%}, Elasticsearch etc.
 
 ## Metrics
 
@@ -27,7 +27,7 @@ Metrics play a pivotal role in fault detection and troubleshooting, offering vis
 
 They are instrumental in measuring and meeting service-level agreements (SLAs) to ensure expected performance and reliability.
 
-GoFr publishes metrics to port: _2121_ on _/metrics_ endpoint in prometheus format.
+GoFr publishes metrics to port: _2121_ on _/metrics_ endpoint in Prometheus format.
 
 {% table %}
 
@@ -133,13 +133,13 @@ GoFr publishes metrics to port: _2121_ on _/metrics_ endpoint in prometheus form
 
 {% /table %}
 
-For example: When running application locally, you can access /metrics endpoint on port 2121 from: {% new-tab-link title="http://localhost:2121/metrics" href="http://localhost:2121/metrics" /%}
+For example: When running application locally, we can access /metrics endpoint on port 2121 from: {% new-tab-link title="http://localhost:2121/metrics" href="http://localhost:2121/metrics" /%}
 
 GoFr also supports creating {% new-tab-link newtab=false title="custom metrics" href="/docs/advanced-guide/publishing-custom-metrics" /%}.
 
 ## Tracing
 
-{% new-tab-link title="Tracing" href="https://opentelemetry.io/docs/concepts/signals/#traces" /%} is a powerful tool for gaining insights into your application's behaviour, identifying bottlenecks, and improving
+{% new-tab-link title="Tracing" href="https://opentelemetry.io/docs/concepts/signals/#traces" /%} is a powerful tool for gaining insights into your application's behavior, identifying bottlenecks, and improving
 system performance. A trace is a tree of spans. It is a collective of observable signals showing the path of work
 through a system. A trace on its own is distinguishable by a `TraceID`.
 
@@ -158,7 +158,7 @@ automatically add traces to all requests and responses.
 **Automatic Correlation ID Propagation:**
 
 When a request enters your GoFr application, GoFr automatically generates a correlation-ID `X-Correlation-ID` and adds it
-to the response headers. This correlation ID is then propagated to all downstream requests. This means that you can track
+to the response headers. This correlation ID is then propagated to all downstream requests. This means that user can track
 a request as it travels through your distributed system by simply looking at the correlation ID in the request headers.
 
 ### Configuration & Usage:
@@ -166,10 +166,10 @@ a request as it travels through your distributed system by simply looking at the
 GoFr has support for following trace-exporters:
 #### 1. [Zipkin](https://zipkin.io/): 
 
-To see the traces install zipkin image using the following docker command:
+To see the traces install zipkin image using the following Docker command:
 
 ```bash
-  docker run --name gofr-zipkin -p 2005:9411 -d openzipkin/zipkin:latest
+docker run --name gofr-zipkin -p 2005:9411 -d openzipkin/zipkin:latest
 ```
 
 Add Tracer configs in `.env` file, your .env will be updated to
@@ -188,9 +188,9 @@ DB_NAME=test_db
 DB_PORT=3306
 
 # tracing configs
-TRACE_EXPORTER=zipkin  
-TRACER_HOST=localhost
-TRACER_PORT=2005
+TRACE_EXPORTER=zipkin
+TRACER_URL=http://localhost:2005/api/v2/spans
+TRACER_RATIO=0.1
 
 LOG_LEVEL=DEBUG
 ```
@@ -201,17 +201,17 @@ LOG_LEVEL=DEBUG
 Open {% new-tab-link title="zipkin" href="http://localhost:2005/zipkin/" /%} and search by TraceID (correlationID) to see the trace.
 {% figure src="/quick-start-trace.png" alt="Zipkin traces" /%}
 
-#### 2. [Jeager](https://www.jaegertracing.io/):
+#### 2. [Jaeger](https://www.jaegertracing.io/):
 
-To see the traces install jaeger image using the following docker command:
+To see the traces install jaeger image using the following Docker command:
 
 ```bash
 docker run -d --name jaeger \
-  -e COLLECTOR_OTLP_ENABLED=true \
-  -p 16686:16686 \
-  -p 14317:4317 \
-  -p 14318:4318 \
-  jaegertracing/all-in-one:1.41
+	-e COLLECTOR_OTLP_ENABLED=true \
+	-p 16686:16686 \
+	-p 14317:4317 \
+	-p 14318:4318 \
+	jaegertracing/all-in-one:1.41
 ```
 
 Add Jaeger Tracer configs in `.env` file, your .env will be updated to
@@ -220,16 +220,32 @@ Add Jaeger Tracer configs in `.env` file, your .env will be updated to
 
 # tracing configs
 TRACE_EXPORTER=jaeger
-TRACER_HOST=localhost
-TRACER_PORT=14317
+TRACER_URL=localhost:14317
+TRACER_RATIO=0.1
 ```
 
-Open {% new-tab-link title="zipkin" href="http://localhost:16686/trace/" /%} and search by TraceID (correlationID) to see the trace.
+Open {% new-tab-link title="jaeger" href="http://localhost:16686/trace/" /%} and search by TraceID (correlationID) to see the trace.
 {% figure src="/jaeger-traces.png" alt="Jaeger traces" /%}
 
-#### 3. [GoFr Tracer](https://tracer.gofr.dev/)
+#### 3. [OpenTelemetry Protocol](https://opentelemetry.io/docs/specs/otlp/):
 
-GoFr tracer is GoFr's own custom trace exporter as well as collector. You can search a trace by its TraceID (correlationID)
+The OpenTelemetry Protocol (OTLP)  underlying gRPC is one of general-purpose telemetry data delivery protocol designed in the scope of the OpenTelemetry project.
+
+Add OTLP configs in `.env` file, your .env will be updated to
+```dotenv
+# ... no change in other env variables
+
+# tracing configs 
+TRACE_EXPORTER=otlp
+TRACER_URL=localhost:4317
+TRACER_RATIO=0.1
+```
+
+
+
+#### 4. [GoFr Tracer](https://tracer.gofr.dev/):
+
+GoFr tracer is GoFr's own custom trace exporter as well as collector. User can search a trace by its TraceID (correlationID)
 in GoFr's own tracer service available anywhere, anytime.
 
 Add GoFr Tracer configs in `.env` file, your .env will be updated to
@@ -238,6 +254,9 @@ Add GoFr Tracer configs in `.env` file, your .env will be updated to
 
 # tracing configs
 TRACE_EXPORTER=gofr
+TRACER_RATIO=0.1
 ```
+
+> NOTE: `TRACER_RATIO` refers to the proportion of traces that are exported through sampling. It ranges between 0 and 1. By default, this ratio is set to 1, meaning all traces are exported.
 
 Open {% new-tab-link title="gofr-tracer" href="https://tracer.gofr.dev/" /%} and search by TraceID (correlationID) to see the trace.
